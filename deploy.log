@@ -1,0 +1,599 @@
+2025-08-14T02:30:44.988Z: Running command app deploy
+2025-08-14T02:30:45.002Z: Running system process:
+  ┬╖ Command: C:\Program Files\nodejs\node.exe C:\Users\troja\AppData\Roaming\npm\node_modules\@shopify\cli\bin\run.js notifications list --ignore-errors
+  ┬╖ Working directory: C:/dev/jedi-sort/collection-sort-v69
+System.Management.Automation.RemoteException
+2025-08-14T02:30:45.017Z: Notifications to show: 0
+2025-08-14T02:30:45.050Z: Reading cached app information for directory C:/dev/jedi-sort/collection-sort-v69...
+2025-08-14T02:30:45.053Z: Reading the content of file at shopify.app.toml...
+2025-08-14T02:30:45.059Z: Reading the content of file at shopify.app.toml...
+2025-08-14T02:30:45.063Z: Reading cached app information for directory C:/dev/jedi-sort/collection-sort-v69...
+2025-08-14T02:30:45.065Z: Reading the content of file at shopify.app.toml...
+2025-08-14T02:30:45.067Z: Reading the content of file at shopify.app.toml...
+2025-08-14T02:30:45.071Z: Ensuring that the user is authenticated with the App Management API with the following scopes:
+[]
+System.Management.Automation.RemoteException
+2025-08-14T02:30:45.072Z: Getting session store...
+2025-08-14T02:30:45.074Z: Validating existing session against the scopes:
+[
+  "openid",
+  "https://api.shopify.com/auth/shop.admin.graphql",
+  "https://api.shopify.com/auth/shop.admin.themes",
+  "https://api.shopify.com/auth/partners.collaborator-relationships.readonly",
+  "https://api.shopify.com/auth/shop.storefront-renderer.devtools",
+  "https://api.shopify.com/auth/partners.app.cli.access",
+  "https://api.shopify.com/auth/destinations.readonly",
+  "https://api.shopify.com/auth/organization.store-management",
+  "https://api.shopify.com/auth/organization.on-demand-user-access",
+  "https://api.shopify.com/auth/organization.apps.manage"
+]
+For applications:
+{
+  "appManagementApi": {
+    "scopes": []
+  },
+  "businessPlatformApi": {
+    "scopes": []
+  }
+}
+System.Management.Automation.RemoteException
+2025-08-14T02:30:45.074Z: - Token validation -> It's expired: false
+2025-08-14T02:30:45.077Z: Sending "BusinessPlatform" GraphQL request:
+  query UserInfo {
+  currentUserAccount {
+    uuid
+    email
+    organizations(first: 2) {
+      nodes {
+        name
+        __typename
+      }
+      __typename
+    }
+    __typename
+  }
+}
+System.Management.Automation.RemoteException
+With request headers:
+ - User-Agent: Shopify CLI; v=3.83.3
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+System.Management.Automation.RemoteException
+to https://destinations.shopifysvc.com/destinations/api/2020-07/graphql
+2025-08-14T02:30:45.118Z: Sending "App Management" GraphQL request:
+  query ActiveAppReleaseFromApiKey($apiKey: String!) {
+  app: appByKey(key: $apiKey) {
+    ...AppVersionInfo
+    __typename
+  }
+}
+System.Management.Automation.RemoteException
+fragment ReleasedAppModule on AppModule {
+  uuid
+  userIdentifier
+  handle
+  config
+  specification {
+    identifier
+    externalIdentifier
+    name
+  }
+}
+System.Management.Automation.RemoteException
+fragment AppVersionInfo on App {
+  id
+  key
+  activeRoot {
+    clientCredentials {
+      secrets {
+        key
+      }
+    }
+  }
+  activeRelease {
+    id
+    version {
+      name
+      appModules {
+        ...ReleasedAppModule
+      }
+    }
+  }
+}
+System.Management.Automation.RemoteException
+With variables:
+{
+  "apiKey": "*****"
+}
+System.Management.Automation.RemoteException
+With request headers:
+ - User-Agent: Shopify CLI; v=3.83.3
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+System.Management.Automation.RemoteException
+to https://app.shopify.com/app_management/unstable/organizations/1981797/graphql.json
+2025-08-14T02:30:45.669Z: Request to https://app.shopify.com/app_management/unstable/organizations/1981797/graphql.json completed in 551 ms
+With response headers:
+ - content-type: application/json; charset=utf-8
+ - server-timing: processing;dur=205, _y;desc="c2d36e72-d911-425e-9717-dd43d13d3b57", _s;desc="6a71b8ef-3fe0-4bd3-a1a2-d70f2a219ddb", cfRequestDuration;dur=442.999840
+ - x-request-id: 812fc9eb-cc2e-4f66-b2d8-56d48842cfd8-1755138644
+    
+2025-08-14T02:30:45.684Z: Sending "BusinessPlatform" GraphQL request:
+  query FindOrganizations($organizationId: OrganizationID!) {
+  currentUserAccount {
+    organization(id: $organizationId) {
+      id
+      name
+      __typename
+    }
+    __typename
+  }
+}
+System.Management.Automation.RemoteException
+With variables:
+{
+  "organizationId": "Z2lkOi8vb3JnYW5pemF0aW9uL09yZ2FuaXphdGlvbi8xOTgxNzk3"
+}
+System.Management.Automation.RemoteException
+With request headers:
+ - User-Agent: Shopify CLI; v=3.83.3
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+System.Management.Automation.RemoteException
+to https://destinations.shopifysvc.com/destinations/api/2020-07/graphql
+2025-08-14T02:30:45.732Z: Sending "App Management" GraphQL request:
+  query fetchSpecifications {
+  specifications {
+    name
+    identifier
+    externalIdentifier
+    features
+    uidStrategy {
+      appModuleLimit
+      isClientProvided
+      __typename
+    }
+    validationSchema {
+      jsonSchema
+      __typename
+    }
+    __typename
+  }
+}
+System.Management.Automation.RemoteException
+With request headers:
+ - User-Agent: Shopify CLI; v=3.83.3
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+System.Management.Automation.RemoteException
+to https://app.shopify.com/app_management/unstable/organizations/1981797/graphql.json
+2025-08-14T02:30:46.477Z: Request to https://app.shopify.com/app_management/unstable/organizations/1981797/graphql.json completed in 744 ms
+With response headers:
+ - content-type: application/json; charset=utf-8
+ - server-timing: processing;dur=402, _y;desc="04a0f545-613b-47dd-b703-9cf7b7672487", _s;desc="f5495809-21e8-4bfa-a27c-bef7666b4bea", cfRequestDuration;dur=670.000076
+ - x-request-id: a96ec0c5-36cb-42da-aba9-3d55735c7fe6-1755138645
+    
+2025-08-14T02:30:46.491Z: The following extension specifications were defined locally but not found in the remote specifications: product_subscription, tax_calculation
+2025-08-14T02:30:46.491Z: The following extension specifications were found in the remote specifications but not defined locally: admin_app, app_link, app_nav_item, bulk_action, checkout_script_tag, flow_action_definition, flow_trigger_definition, flow_trigger_discovery_webhook, manage_marketplaces, marketing_action, merchandising_create_publication, merchandising_fulfillment_variant_details, ping_message_callback, pos_link, product_configuration_link, resource_publication_settings, retail_cart_promotion, retail_product_recommendation, subscription_link
+2025-08-14T02:30:46.498Z: Reading the content of file at .gitignore...
+2025-08-14T02:30:46.503Z: Reading the .env file at .env
+2025-08-14T02:30:46.503Z: Reading the content of file at .env...
+2025-08-14T02:30:46.568Z: Reading the content of file at package.json...
+2025-08-14T02:30:46.569Z: Reading the content of file at package.json...
+2025-08-14T02:30:46.606Z: Running system process:
+  ┬╖ Command: npm prefix
+  ┬╖ Working directory: C:/dev/jedi-sort/collection-sort-v69
+System.Management.Automation.RemoteException
+2025-08-14T02:30:47.057Z: Obtaining the dependency manager in directory C:\dev\jedi-sort\collection-sort-v69...
+2025-08-14T02:30:47.059Z: Reading the content of file at package.json...
+2025-08-14T02:30:47.061Z: Reading the content of file at .shopify/project.json...
+2025-08-14T02:30:47.067Z: Reading the content of file at shopify.web.toml...
+2025-08-14T02:30:47.072Z: Notifications to show: 0
+2025-08-14T02:30:47.074Z: Reading cached app information for directory C:/dev/jedi-sort/collection-sort-v69...
+2025-08-14T02:30:47.075Z: Storing app information for directory C:/dev/jedi-sort/collection-sort-v69:{
+  "appId": "d47277756f05010485d031012b084573",
+  "title": "Collection Sort V69",
+  "directory": "C:/dev/jedi-sort/collection-sort-v69",
+  "orgId": "1981797"
+}
+2025-08-14T02:30:47.108Z: Sending "App Management" GraphQL request:
+  query ActiveAppReleaseFromApiKey($apiKey: String!) {
+  app: appByKey(key: $apiKey) {
+    ...AppVersionInfo
+    __typename
+  }
+}
+System.Management.Automation.RemoteException
+fragment ReleasedAppModule on AppModule {
+  uuid
+  userIdentifier
+  handle
+  config
+  specification {
+    identifier
+    externalIdentifier
+    name
+  }
+}
+System.Management.Automation.RemoteException
+fragment AppVersionInfo on App {
+  id
+  key
+  activeRoot {
+    clientCredentials {
+      secrets {
+        key
+      }
+    }
+  }
+  activeRelease {
+    id
+    version {
+      name
+      appModules {
+        ...ReleasedAppModule
+      }
+    }
+  }
+}
+System.Management.Automation.RemoteException
+With variables:
+{
+  "apiKey": "*****"
+}
+System.Management.Automation.RemoteException
+With request headers:
+ - User-Agent: Shopify CLI; v=3.83.3
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+System.Management.Automation.RemoteException
+to https://app.shopify.com/app_management/unstable/organizations/1981797/graphql.json
+2025-08-14T02:30:47.540Z: Request to https://app.shopify.com/app_management/unstable/organizations/1981797/graphql.json completed in 431 ms
+With response headers:
+ - content-type: application/json; charset=utf-8
+ - server-timing: processing;dur=128, _y;desc="a281848b-9403-46cc-9a75-05a968701122", _s;desc="121e2040-1093-4509-8c86-73470abe3c6d", cfRequestDuration;dur=355.999708
+ - x-request-id: 47ccd9b2-a794-43db-a9a7-2c2a59886e21-1755138646
+    
+System.Management.Automation.RemoteException
+Releasing a new app version as part of Collection Sort V69
+System.Management.Automation.RemoteException
+2025-08-14T02:30:47.583Z: Removing directory at .shopify/deploy-bundle...
+2025-08-14T02:30:47.590Z: Creating directory at .shopify/deploy-bundle...
+ΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûå
+ΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûü
+Running validation ...
+2025-08-14T02:30:47.684Z: Sending "App Management" GraphQL request:
+  mutation CreateAppVersion($appId: ID!, $version: AppVersionInput!, $metadata: VersionMetadataInput) {
+  appVersionCreate(appId: $appId, version: $version, metadata: $metadata) {
+    version {
+      id
+      appModules {
+        ...ReleasedAppModule
+        __typename
+      }
+      metadata {
+        versionTag
+        message
+        __typename
+      }
+      __typename
+    }
+    userErrors {
+      field
+      message
+      category
+      code
+      on
+      __typename
+    }
+    __typename
+  }
+}
+System.Management.Automation.RemoteException
+fragment ReleasedAppModule on AppModule {
+  uuid
+  userIdentifier
+  handle
+  config
+  specification {
+    identifier
+    externalIdentifier
+    name
+  }
+}
+System.Management.Automation.RemoteException
+With variables:
+{
+  "appId": "gid://shopify/App/273468162049",
+  "version": {
+    "source": {
+      "name": "Collection Sort V69",
+      "modules": [
+        {
+          "uid": "app_access",
+          "type": "app_access",
+          "handle": "app_access",
+          "config": {
+            "scopes": "read_all_orders,read_inventory,read_orders,read_products,write_products",
+            "redirect_url_allowlist": [
+              "https://example.com/api/auth"
+            ]
+          }
+        },
+        {
+          "uid": "webhooks",
+          "type": "webhooks",
+          "handle": "webhooks",
+          "config": {
+            "api_version": "2025-10"
+          }
+        },
+        {
+          "uid": "app_home",
+          "type": "app_home",
+          "handle": "app_home",
+          "config": {
+            "app_url": "https://example.com",
+            "embedded": true
+          }
+        },
+        {
+          "uid": "branding",
+          "type": "branding",
+          "handle": "branding",
+          "config": {
+            "name": "Collection Sort V69"
+          }
+        },
+        {
+          "uid": "aefec2d9-fbd0-32fa-13b3-881b1a1ecd15f8dcaf2e",
+          "type": "webhook_subscription",
+          "handle": "4103dafc7ac513f42a23183acf8fae610f56f29e",
+          "config": {
+            "topic": "app/scopes_update",
+            "api_version": "2025-10",
+            "uri": "https://example.com/webhooks/app/scopes_update"
+          }
+        },
+        {
+          "uid": "c994b1c1-d441-9ee1-f0ca-fb37f6bf721bafae1f17",
+          "type": "webhook_subscription",
+          "handle": "09711dbb6e24902b5a6cc0eb5164b8e4d2301cbf",
+          "config": {
+            "topic": "app/uninstalled",
+            "api_version": "2025-10",
+            "uri": "https://example.com/webhooks/app/uninstalled"
+          }
+        }
+      ]
+    }
+  },
+  "metadata": {}
+}
+System.Management.Automation.RemoteException
+With request headers:
+ - User-Agent: Shopify CLI; v=3.83.3
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+System.Management.Automation.RemoteException
+to https://app.shopify.com/app_management/unstable/organizations/1981797/graphql.json
+[2K[1A[2K[1A[2K[1A[2K[GΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûå
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûç
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûç
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûê
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûê
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûç
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûç
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûå
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûå
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûà
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûà
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûä
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûä
+Releasing an app version ...
+2025-08-14T02:30:48.218Z: Request to https://app.shopify.com/app_management/unstable/organizations/1981797/graphql.json completed in 534 ms
+With response headers:
+ - content-type: application/json; charset=utf-8
+ - server-timing: processing;dur=241, _y;desc="608671ed-96fb-46d4-b263-03c20027ac67", _s;desc="96608bc3-9e83-401e-868e-6ba89fadce4b", cfRequestDuration;dur=465.999842
+ - x-request-id: 7734e312-f8ea-4dd7-8cd5-6ed9d7f661c5-1755138646
+    
+[2K[1A[2K[1A[2K[GΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâ
+Releasing an app version ...
+2025-08-14T02:30:48.271Z: Sending "App Management" GraphQL request:
+  mutation ReleaseVersion($appId: ID!, $versionId: ID!) {
+  appReleaseCreate(appId: $appId, versionId: $versionId) {
+    release {
+      version {
+        id
+        metadata {
+          message
+          versionTag
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    userErrors {
+      field
+      message
+      category
+      code
+      on
+      __typename
+    }
+    __typename
+  }
+}
+System.Management.Automation.RemoteException
+With variables:
+{
+  "appId": "gid://shopify/App/273468162049",
+  "versionId": "gid://shopify/Version/694465200129"
+}
+System.Management.Automation.RemoteException
+With request headers:
+ - User-Agent: Shopify CLI; v=3.83.3
+ - Keep-Alive: timeout=30
+ - Sec-CH-UA-PLATFORM: win32
+ - Content-Type: application/json
+System.Management.Automation.RemoteException
+to https://app.shopify.com/app_management/unstable/organizations/1981797/graphql.json
+[2K[1A[2K[1A[2K[GΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâ
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûé
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûé
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûü
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûü
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûü
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûü
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûé
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûé
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâ
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâ
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûä
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûä
+Releasing an app version ...
+[2K[1A[2K[1A[2K[GΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûàΓûäΓûäΓûâΓûâΓûéΓûéΓûüΓûüΓûüΓûüΓûéΓûéΓûâΓûâΓûäΓûäΓûàΓûàΓûåΓûåΓûçΓûçΓûêΓûêΓûçΓûçΓûåΓûåΓûàΓûà
+Releasing an app version ...
+2025-08-14T02:30:48.891Z: Request to https://app.shopify.com/app_management/unstable/organizations/1981797/graphql.json completed in 620 ms
+With response headers:
+ - content-type: application/json; charset=utf-8
+ - server-timing: processing;dur=216, _y;desc="103fd120-0eb9-4a6a-8132-106db8c4f0d6", _s;desc="109625e2-3ed8-4bf2-bd9e-359e91dd59f5", cfRequestDuration;dur=540.999889
+ - x-request-id: f6644d7a-a757-415c-9295-bd6e179ff4fe-1755138647
+    
+[2K[1A[2K[1A[2K[G
+Γò¡ΓöÇ success ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò«
+Γöé                                                                              Γöé
+Γöé  New version released to users.                                              Γöé
+Γöé                                                                              Γöé
+Γöé  collection-sort-v69-7 [1]                                                   Γöé
+Γöé                                                                              Γöé
+Γò░ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓò»
+[1] https://dev.shopify.com/dashboard/1981797/apps/273468162049/versions/6944652
+00129
+System.Management.Automation.RemoteException
+2025-08-14T02:30:48.945Z: Running system process:
+  ┬╖ Command: npm prefix
+  ┬╖ Working directory: C:/dev/jedi-sort/collection-sort-v69
+System.Management.Automation.RemoteException
+2025-08-14T02:30:49.360Z: Obtaining the dependency manager in directory C:\dev\jedi-sort\collection-sort-v69...
+2025-08-14T02:30:50.045Z: Request to https://monorail-edge.shopifysvc.com/v1/produce completed in 245 ms
+With response headers:
+ - x-request-id: 4a422f62-8466-44ac-acf5-7a752219f1dc
+    
+2025-08-14T02:30:50.046Z: Analytics event sent: {
+  "command": "app deploy",
+  "time_start": 1755138644989,
+  "time_end": 1755138648915,
+  "total_time": 3926,
+  "success": true,
+  "cli_version": "3.83.3",
+  "ruby_version": "",
+  "node_version": "22.18.0",
+  "is_employee": false,
+  "uname": "windows amd64",
+  "env_ci": false,
+  "env_plugin_installed_any_custom": false,
+  "env_plugin_installed_shopify": "[\"@shopify/cli\"]",
+  "env_shell": "powershell",
+  "env_device_id": "8deae2ade7b63ad9bb49f52f7f88bfbbb982d5ce",
+  "env_cloud": "localhost",
+  "env_package_manager": "npm",
+  "env_is_global": true,
+  "env_auth_method": "device_auth",
+  "env_is_wsl": false,
+  "env_build_repository": "Shopify/cli",
+  "cmd_app_warning_api_key_deprecation_displayed": false,
+  "cmd_deploy_flag_message_used": false,
+  "cmd_deploy_flag_version_used": false,
+  "cmd_deploy_flag_source_url_used": false,
+  "cmd_app_all_configs_any": true,
+  "cmd_app_all_configs_clients": "{\"shopify.app.toml\":\"d47277756f05010485d031012b084573\"}",
+  "cmd_app_linked_config_used": true,
+  "cmd_app_linked_config_name": "shopify.app.toml",
+  "cmd_app_linked_config_git_tracked": true,
+  "cmd_app_linked_config_source": "cached",
+  "cmd_app_linked_config_uses_cli_managed_urls": true,
+  "project_type": "node",
+  "app_extensions_any": false,
+  "app_extensions_breakdown": "{}",
+  "app_extensions_count": 0,
+  "app_extensions_custom_layout": false,
+  "app_extensions_function_any": false,
+  "app_extensions_function_count": 0,
+  "app_extensions_theme_any": false,
+  "app_extensions_theme_count": 0,
+  "app_extensions_ui_any": false,
+  "app_extensions_ui_count": 0,
+  "app_name_hash": "0426be55ddf771eec93eebd19b7728b5c10f8465",
+  "app_path_hash": "c65a082e3e29f5f353ba22ab5837ff732e472d81",
+  "app_scopes": "[\"read_all_orders\",\"read_inventory\",\"read_orders\",\"read_products\",\"write_products\"]",
+  "app_web_backend_any": true,
+  "app_web_backend_count": 1,
+  "app_web_custom_layout": true,
+  "app_web_framework": "remix",
+  "app_web_frontend_any": true,
+  "app_web_frontend_count": 1,
+  "env_package_manager_workspaces": true,
+  "business_platform_id": 1981797,
+  "api_key": "****",
+  "cmd_app_reset_used": false,
+  "cmd_deploy_include_config_used": true,
+  "cmd_deploy_config_modules_breakdown": "[\"access_scopes\",\"application_url\",\"auth\",\"embedded\",\"name\",\"webhooks\"]",
+  "cmd_deploy_config_modules_updated": "[\"webhooks\"]",
+  "cmd_all_timing_network_ms": 2881,
+  "cmd_all_timing_prompts_ms": 0,
+  "cmd_all_launcher": "unknown",
+  "cmd_all_topic": "app",
+  "cmd_all_plugin": "@shopify/app",
+  "cmd_all_force": true,
+  "cmd_all_verbose": true,
+  "cmd_all_path_override": true,
+  "cmd_all_path_override_hash": "c65a082e3e29f5f353ba22ab5837ff732e472d81",
+  "cmd_all_last_graphql_request_id": "f6644d7a-a757-415c-9295-bd6e179ff4fe-1755138647",
+  "cmd_all_timing_active_ms": 1044,
+  "cmd_all_exit": "ok",
+  "user_id": "c3a553a2-31a9-49b3-85ac-fb4e54c66433",
+  "request_ids": [
+    "812fc9eb-cc2e-4f66-b2d8-56d48842cfd8-1755138644",
+    "a96ec0c5-36cb-42da-aba9-3d55735c7fe6-1755138645",
+    "47ccd9b2-a794-43db-a9a7-2c2a59886e21-1755138646",
+    "7734e312-f8ea-4dd7-8cd5-6ed9d7f661c5-1755138646",
+    "f6644d7a-a757-415c-9295-bd6e179ff4fe-1755138647"
+  ],
+  "args": "--verbose --force",
+  "app_name": "collection-sort-v69",
+  "env_plugin_installed_all": "[\"@shopify/cli\"]",
+  "metadata": "{\"extraPublic\":{},\"extraSensitive\":{}}"
+}
+2025-08-14T02:30:50.046Z: Completed command app deploy
