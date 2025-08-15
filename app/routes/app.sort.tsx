@@ -2,7 +2,7 @@
 import type { LoaderFunctionArgs, HeadersFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { authenticate } from "~/shopify.server";
 import {
   Page,
@@ -19,39 +19,56 @@ import {
   Banner,
 } from "@shopify/polaris";
 
+type Coll = { id: string; title: string };
+
 export const headers: HeadersFunction = () => ({
-  // Allow Shopify Admin to embed this page
   "Content-Security-Policy":
     "frame-ancestors https://admin.shopify.com https://*.myshopify.com;",
 });
 
+const COLLECTIONS_QUERY = `#graphql
+  query Colls($first: Int!, $after: String) {
+    collections(first: $first, after: $after, sortKey: TITLE) {
+      edges { cursor node { id title } }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    // If there is a valid admin session, proceed to render.
-    await authenticate.admin(request);
-    // Keep the shape your component expects
-    return json({ ok: true, collections: null });
+    // get Admin GraphQL client
+    const { admin } = await authenticate.admin(request);
+
+    // pull first 250 collections (plenty for the picker; you can paginate later)
+    const res = await admin.graphql(COLLECTIONS_QUERY, {
+      variables: { first: 250 },
+    });
+    const body = await res.json();
+    const edges = body?.data?.collections?.edges ?? [];
+    const collections: Coll[] = edges.map((e: any) => e.node);
+
+    return json({ ok: true, collections });
   } catch {
-    // No session → ALWAYS do OAuth at the TOP level (never inside the Admin iframe)
+    // No session → ALWAYS do OAuth at TOP level; preserve host & shop
     const url = new URL(request.url);
     const shop = url.searchParams.get("shop") || "";
+    const host = url.searchParams.get("host") || "";
     const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><meta name="robots" content="noindex"/></head>
-<body>
-<script>
+<body><script>
   (function () {
-    var params = new URLSearchParams(window.location.search);
-    var shop = params.get("shop") || ${JSON.stringify(shop)};
-    var target = "/auth?shop=" + encodeURIComponent(shop);
-    // Always top-level navigation to avoid "accounts.shopify.com refused to connect"
-    if (window.top === window.self) {
-      window.location.href = target;     // top-level
-    } else {
-      window.top.location.href = target; // break out of iframe/admin shell
-    }
+    var p = new URLSearchParams(window.location.search);
+    var shop = p.get("shop") || ${JSON.stringify(shop)};
+    var host = p.get("host") || ${JSON.stringify(host)};
+    var qs = [];
+    if (shop) qs.push("shop=" + encodeURIComponent(shop));
+    if (host) qs.push("host=" + encodeURIComponent(host));
+    var target = "/auth" + (qs.length ? "?" + qs.join("&") : "");
+    if (window.top === window.self) { window.location.href = target; }
+    else { window.top.location.href = target; }
   })();
-</script>
-</body></html>`;
+</script></body></html>`;
     return new Response(html, {
       status: 200,
       headers: {
@@ -60,6 +77,17 @@ export async function loader({ request }: LoaderFunctionArgs) {
           "frame-ancestors https://admin.shopify.com https://*.myshopify.com;",
       },
     });
+  }
+}
+
+function labelForRule(k: string) {
+  switch (k) {
+    case "in_stock": return "In-stock first";
+    case "sales_90d": return "Best sellers (90d)";
+    case "variants_in_stock": return "Most variants in stock";
+    case "alpha": return "Title A→Z";
+    case "oos_last": return "OOS last";
+    default: return k;
   }
 }
 
@@ -74,12 +102,61 @@ export default function SortPage() {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<string[] | null>(null);
 
+  // strategy (rules) state
+  const [rules, setRules] = useState<string[]>([]);
+  const [savingRules, setSavingRules] = useState(false);
+
+  // load strategy when collection changes
+  useEffect(() => {
+    if (!selectedId) return;
+    (async () => {
+      try {
+        const r = await fetch(`/api/strategy?collectionId=${encodeURIComponent(selectedId)}`, {
+          credentials: "include",
+        });
+        const j = await r.json();
+        if (j?.ok && Array.isArray(j.rules)) setRules(j.rules);
+      } catch (e) {
+        // ignore load errors in UI
+      }
+    })();
+  }, [selectedId]);
+
   const options = useMemo(() => {
-    const filtered = (collections ?? []).filter((c: any) =>
+    const filtered = (collections ?? []).filter((c: Coll) =>
       c.title.toLowerCase().includes(search.toLowerCase())
     );
-    return filtered.map((c: any) => ({ label: c.title, value: c.id }));
+    return filtered.map((c: Coll) => ({ label: c.title, value: c.id }));
   }, [collections, search]);
+
+  function moveRule(idx: number, dir: -1 | 1) {
+    setRules(prev => {
+      const next = prev.slice();
+      const j = idx + dir;
+      if (j < 0 || j >= next.length) return prev;
+      [next[idx], next[j]] = [next[j], next[idx]];
+      return next;
+    });
+  }
+
+  async function saveRules() {
+    if (!selectedId) return;
+    setSavingRules(true);
+    try {
+      const r = await fetch("/api/strategy", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collectionId: selectedId, rules }),
+      });
+      const j = await r.json().catch(() => ({ ok: false, error: "Bad JSON" }));
+      setMsg(j.ok ? "Saved sorting rules for this collection." : `Error: ${j.error || "unknown"}`);
+    } catch (e: any) {
+      setMsg(`Failed: ${e?.message || String(e)}`);
+    } finally {
+      setSavingRules(false);
+    }
+  }
 
   async function runSingle() {
     setBusy(true);
@@ -104,17 +181,9 @@ export default function SortPage() {
       if (j.ok) {
         if (j.dryRun) {
           setPreview(j.preview || []);
-          setMsg(
-            `Dry run: would consider ${j.considered} items. Showing first ${
-              j.preview?.length ?? 0
-            }.`
-          );
+          setMsg(`Dry run: would consider ${j.considered} items. Showing first ${j.preview?.length ?? 0}.`);
         } else {
-          setMsg(
-            `Done. Moved ${j.moved} (considered ${j.considered})${
-              j.appliedTopN ? `, Top-N=${j.appliedTopN}` : ""
-            }.`
-          );
+          setMsg(`Done. Moved ${j.moved} (considered ${j.considered})${j.appliedTopN ? `, Top-N=${j.appliedTopN}` : ""}.`);
         }
       } else {
         setMsg(`Error: ${j.error || "unknown"}`);
@@ -142,11 +211,7 @@ export default function SortPage() {
         }),
       });
       const j = await r.json().catch(() => ({ ok: false, error: "Bad JSON" }));
-      if (j.ok) {
-        setMsg(`All done. Processed ${j.processed}. ${dryRun ? "Dry-run only." : ""}`);
-      } else {
-        setMsg(`Error: ${j.error || "unknown"}`);
-      }
+      setMsg(j.ok ? `All done. Processed ${j.processed}. ${dryRun ? "Dry-run only." : ""}` : `Error: ${j.error || "unknown"}`);
     } catch (e: any) {
       setMsg(`Failed: ${e?.message || String(e)}`);
     } finally {
@@ -161,8 +226,7 @@ export default function SortPage() {
           <Card>
             <BlockStack gap="400">
               <Text as="p">
-                Hierarchy: <b>In-stock</b> → <b>Best-selling (90d)</b> →{" "}
-                <b>Most variants in stock</b> → <b>OOS last</b>.
+                Hierarchy: <b>In-stock</b> → <b>Best-selling (90d)</b> → <b>Most variants in stock</b> → <b>OOS last</b>.
               </Text>
 
               <InlineStack gap="400" wrap={false} align="start">
@@ -185,6 +249,37 @@ export default function SortPage() {
                 </div>
               </InlineStack>
 
+              {/* Rules editor */}
+              {selectedId && rules?.length > 0 && (
+                <Card>
+                  <BlockStack gap="200">
+                    <Text as="h3" variant="headingSm">Rules order for this collection</Text>
+                    <BlockStack gap="150">
+                      {rules.map((r, i) => (
+                        <InlineStack key={r} align="space-between">
+                          <Text>{i + 1}. {labelForRule(r)}</Text>
+                          <InlineStack gap="200">
+                            <Button size="slim" onClick={() => moveRule(i, -1)} disabled={i === 0}>Up</Button>
+                            <Button size="slim" onClick={() => moveRule(i, +1)} disabled={i === rules.length - 1}>Down</Button>
+                          </InlineStack>
+                        </InlineStack>
+                      ))}
+                      <InlineStack gap="200">
+                        <Button
+                          size="slim"
+                          onClick={() => setRules(["in_stock","sales_90d","variants_in_stock","alpha","oos_last"])}
+                        >
+                          Reset to default
+                        </Button>
+                        <Button primary size="slim" onClick={saveRules} loading={savingRules}>
+                          Save rules
+                        </Button>
+                      </InlineStack>
+                    </BlockStack>
+                  </BlockStack>
+                </Card>
+              )}
+
               <InlineStack gap="400" align="start" wrap={false}>
                 <TextField
                   label="Top-N (apply only first N positions)"
@@ -204,7 +299,7 @@ export default function SortPage() {
                 />
                 <Button
                   pressed={dryRun}
-                  onClick={() => setDryRun((v) => !v)}
+                  onClick={() => setDryRun(v => !v)}
                   accessibilityLabel="Toggle dry-run"
                 >
                   {dryRun ? "Dry-run: ON" : "Dry-run: OFF"}
@@ -213,13 +308,7 @@ export default function SortPage() {
 
               <InlineStack gap="400" align="start">
                 <Button primary onClick={runSingle} disabled={!selectedId || busy}>
-                  {busy ? (
-                    <InlineStack gap="200">
-                      <Spinner size="small" /> <span>Working…</span>
-                    </InlineStack>
-                  ) : (
-                    "Run now"
-                  )}
+                  {busy ? (<InlineStack gap="200"><Spinner size="small" /> <span>Working…</span></InlineStack>) : "Run now"}
                 </Button>
 
                 <Button onClick={runAll} disabled={busy}>
@@ -234,11 +323,7 @@ export default function SortPage() {
               </InlineStack>
 
               {msg && (
-                <Banner
-                  tone={
-                    msg.startsWith("Error") || msg.startsWith("Failed") ? "critical" : "success"
-                  }
-                >
+                <Banner tone={msg.startsWith("Error") || msg.startsWith("Failed") ? "critical" : "success"}>
                   {msg}
                 </Banner>
               )}
@@ -246,20 +331,22 @@ export default function SortPage() {
               {preview && preview.length > 0 && (
                 <Card>
                   <BlockStack gap="200">
-                    <Text as="h3" variant="headingSm">
-                      Dry-run preview (first {preview.length})
-                    </Text>
+                    <Text as="h3" variant="headingSm">Dry-run preview (first {preview.length})</Text>
                     <Text as="p" tone="subdued">
                       Product GIDs (top of list):<br />
-                      <code style={{ fontSize: 12, wordBreak: "break-all" }}>
-                        {preview.join(", ")}
-                      </code>
+                      <code style={{ fontSize: 12, wordBreak: "break-all" }}>{preview.join(", ")}</code>
                     </Text>
                   </BlockStack>
                 </Card>
               )}
             </BlockStack>
           </Card>
+
+          {!collections?.length && (
+            <Card>
+              <Text tone="critical">No collections found. Try another store, or check that your app has read_products scope.</Text>
+            </Card>
+          )}
         </Layout.Section>
       </Layout>
     </Page>
