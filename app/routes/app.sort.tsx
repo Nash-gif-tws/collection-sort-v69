@@ -1,24 +1,66 @@
-import { useState, useMemo } from "react";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+// app/routes/app.sort.tsx
+import type { LoaderFunctionArgs, HeadersFunction } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData } from "@remix-run/react";
+import React, { useMemo, useState } from "react";
+import { authenticate } from "~/shopify.server";
 import {
-  Page, Layout, Card, Text, TextField, Button,
-  Select, InlineStack, Banner, BlockStack, Badge, Spinner
+  Page,
+  Layout,
+  Card,
+  BlockStack,
+  InlineStack,
+  Text,
+  TextField,
+  Select,
+  Button,
+  Spinner,
+  Badge,
+  Banner,
 } from "@shopify/polaris";
-import { authenticate } from "../shopify.server";
 
-type Coll = { id: string; title: string };
+export const headers: HeadersFunction = () => ({
+  // Allow Shopify Admin to embed this page
+  "Content-Security-Policy":
+    "frame-ancestors https://admin.shopify.com https://*.myshopify.com;",
+});
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  const { admin } = await authenticate.admin(request);
-  // fetch a small list to choose from (title + id)
-  const resp = await admin.graphql(`#graphql
-    { collections(first: 50) { edges { node { id title } } } }`);
-  const data = await resp.json() as any;
-  const list: Coll[] =
-    (data?.data?.collections?.edges ?? []).map((e: any) => e.node);
-  return json({ collections: list });
+  try {
+    // If there is a valid admin session, proceed to render.
+    await authenticate.admin(request);
+    // Keep the shape your component expects
+    return json({ ok: true, collections: null });
+  } catch {
+    // No session → ALWAYS do OAuth at the TOP level (never inside the Admin iframe)
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop") || "";
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"/><meta name="robots" content="noindex"/></head>
+<body>
+<script>
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    var shop = params.get("shop") || ${JSON.stringify(shop)};
+    var target = "/auth?shop=" + encodeURIComponent(shop);
+    // Always top-level navigation to avoid "accounts.shopify.com refused to connect"
+    if (window.top === window.self) {
+      window.location.href = target;     // top-level
+    } else {
+      window.top.location.href = target; // break out of iframe/admin shell
+    }
+  })();
+</script>
+</body></html>`;
+    return new Response(html, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Security-Policy":
+          "frame-ancestors https://admin.shopify.com https://*.myshopify.com;",
+      },
+    });
+  }
 }
 
 export default function SortPage() {
@@ -33,10 +75,10 @@ export default function SortPage() {
   const [preview, setPreview] = useState<string[] | null>(null);
 
   const options = useMemo(() => {
-    const filtered = (collections ?? []).filter((c: Coll) =>
+    const filtered = (collections ?? []).filter((c: any) =>
       c.title.toLowerCase().includes(search.toLowerCase())
     );
-    return filtered.map((c: Coll) => ({ label: c.title, value: c.id }));
+    return filtered.map((c: any) => ({ label: c.title, value: c.id }));
   }, [collections, search]);
 
   async function runSingle() {
@@ -56,13 +98,23 @@ export default function SortPage() {
       });
       const ct = r.headers.get("content-type") || "";
       const text = await r.text();
-      const j = ct.includes("application/json") ? JSON.parse(text) : { ok: false, error: text };
+      const j = ct.includes("application/json")
+        ? JSON.parse(text)
+        : { ok: false, error: text };
       if (j.ok) {
         if (j.dryRun) {
           setPreview(j.preview || []);
-          setMsg(`Dry run: would consider ${j.considered} items. Showing first ${j.preview?.length ?? 0}.`);
+          setMsg(
+            `Dry run: would consider ${j.considered} items. Showing first ${
+              j.preview?.length ?? 0
+            }.`
+          );
         } else {
-          setMsg(`Done. Moved ${j.moved} (considered ${j.considered})${j.appliedTopN ? `, Top-N=${j.appliedTopN}` : ""}.`);
+          setMsg(
+            `Done. Moved ${j.moved} (considered ${j.considered})${
+              j.appliedTopN ? `, Top-N=${j.appliedTopN}` : ""
+            }.`
+          );
         }
       } else {
         setMsg(`Error: ${j.error || "unknown"}`);
@@ -109,7 +161,8 @@ export default function SortPage() {
           <Card>
             <BlockStack gap="400">
               <Text as="p">
-                Hierarchy: <b>In-stock</b> → <b>Best-selling (90d)</b> → <b>Most variants in stock</b> → <b>OOS last</b>.
+                Hierarchy: <b>In-stock</b> → <b>Best-selling (90d)</b> →{" "}
+                <b>Most variants in stock</b> → <b>OOS last</b>.
               </Text>
 
               <InlineStack gap="400" wrap={false} align="start">
@@ -125,7 +178,7 @@ export default function SortPage() {
                 <div style={{ minWidth: 420 }}>
                   <Select
                     label="Choose a collection"
-                    options={options.length ? options : [{label:"No matches", value:""}]}
+                    options={options.length ? options : [{ label: "No matches", value: "" }]}
                     value={selectedId}
                     onChange={setSelectedId}
                   />
@@ -151,7 +204,7 @@ export default function SortPage() {
                 />
                 <Button
                   pressed={dryRun}
-                  onClick={() => setDryRun(v => !v)}
+                  onClick={() => setDryRun((v) => !v)}
                   accessibilityLabel="Toggle dry-run"
                 >
                   {dryRun ? "Dry-run: ON" : "Dry-run: OFF"}
@@ -160,7 +213,13 @@ export default function SortPage() {
 
               <InlineStack gap="400" align="start">
                 <Button primary onClick={runSingle} disabled={!selectedId || busy}>
-                  {busy ? (<InlineStack gap="200"><Spinner size="small" /> <span>Working…</span></InlineStack>) : "Run now"}
+                  {busy ? (
+                    <InlineStack gap="200">
+                      <Spinner size="small" /> <span>Working…</span>
+                    </InlineStack>
+                  ) : (
+                    "Run now"
+                  )}
                 </Button>
 
                 <Button onClick={runAll} disabled={busy}>
@@ -175,7 +234,11 @@ export default function SortPage() {
               </InlineStack>
 
               {msg && (
-                <Banner tone={msg.startsWith("Error") || msg.startsWith("Failed") ? "critical" : "success"}>
+                <Banner
+                  tone={
+                    msg.startsWith("Error") || msg.startsWith("Failed") ? "critical" : "success"
+                  }
+                >
                   {msg}
                 </Banner>
               )}
@@ -183,10 +246,14 @@ export default function SortPage() {
               {preview && preview.length > 0 && (
                 <Card>
                   <BlockStack gap="200">
-                    <Text as="h3" variant="headingSm">Dry-run preview (first {preview.length})</Text>
+                    <Text as="h3" variant="headingSm">
+                      Dry-run preview (first {preview.length})
+                    </Text>
                     <Text as="p" tone="subdued">
                       Product GIDs (top of list):<br />
-                      <code style={{ fontSize: 12, wordBreak: "break-all" }}>{preview.join(", ")}</code>
+                      <code style={{ fontSize: 12, wordBreak: "break-all" }}>
+                        {preview.join(", ")}
+                      </code>
                     </Text>
                   </BlockStack>
                 </Card>
