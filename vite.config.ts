@@ -2,6 +2,8 @@ import { vitePlugin as remix } from "@remix-run/dev";
 import { installGlobals } from "@remix-run/node";
 import { defineConfig, type UserConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
+import path from "path";
+import { fileURLToPath } from "url";
 
 installGlobals({ nativeFetch: true });
 
@@ -17,8 +19,7 @@ if (
   delete process.env.HOST;
 }
 
-const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost")
-  .hostname;
+const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost").hostname;
 
 let hmrConfig;
 if (host === "localhost") {
@@ -36,6 +37,8 @@ if (host === "localhost") {
     clientPort: 443,
   };
 }
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   server: {
@@ -64,6 +67,11 @@ export default defineConfig({
     }),
     tsconfigPaths(),
   ],
+  resolve: {
+    alias: {
+      "~": path.resolve(__dirname, "app"), // <<— fixes '~/shopify.server' etc.
+    },
+  },
   build: {
     assetsInlineLimit: 0,
   },
