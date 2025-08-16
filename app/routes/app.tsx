@@ -43,7 +43,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       status: 200,
       headers: {
         "Content-Type": "text/html; charset=utf-8",
-        "Content-Security-Policy": "frame-ancestors https://admin.shopify.com https://*.myshopify.com;",
+        "Content-Security-Policy":
+          "frame-ancestors https://admin.shopify.com https://*.myshopify.com;",
       },
     });
   }
@@ -55,6 +56,9 @@ export default function App() {
     <AppProvider isEmbeddedApp apiKey={apiKey}>
       <NavMenu>
         <Link to="/app" rel="home">Home</Link>
+        <Link to="/app/sort">Sort</Link>
+        <Link to="/app/analytics">Analytics</Link>
+        {/* Keep or remove as you like: */}
         <Link to="/app/additional">Additional page</Link>
       </NavMenu>
       <Outlet />
@@ -62,10 +66,15 @@ export default function App() {
   );
 }
 
-export function ErrorBoundary() { return boundary.error(useRouteError()); }
+export function ErrorBoundary() {
+  return boundary.error(useRouteError());
+}
 
 export const headers: HeadersFunction = (args) => {
   const base = new Headers(boundary.headers(args));
-  base.set("Content-Security-Policy", "frame-ancestors https://admin.shopify.com https://*.myshopify.com;");
+  base.set(
+    "Content-Security-Policy",
+    "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
+  );
   return base;
 };
