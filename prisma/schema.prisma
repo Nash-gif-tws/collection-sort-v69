@@ -9,12 +9,14 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/* --- existing session table (kept) --- */
+/**
+ * --- existing session table (kept) ---
+ */
 model Session {
-  id            String   @id
+  id            String    @id
   shop          String
   state         String
-  isOnline      Boolean  @default(false)
+  isOnline      Boolean   @default(false)
   scope         String?
   expires       DateTime?
   accessToken   String
@@ -22,42 +24,46 @@ model Session {
   firstName     String?
   lastName      String?
   email         String?
-  accountOwner  Boolean  @default(false)
+  accountOwner  Boolean   @default(false)
   locale        String?
-  collaborator  Boolean? @default(false)
-  emailVerified Boolean? @default(false)
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
 }
 
-/* --- analytics MVP tables --- */
+/**
+ * --- analytics MVP tables ---
+ */
 model Product {
-  id        String    @id           // Shopify gid
-  title     String
-  vendor    String?
-  createdAt DateTime?
-  variants  Variant[]
+  id          String        @id // Shopify gid
+  title       String
+  vendor      String?
+  createdAt   DateTime?
+  variants    Variant[]
+  ProductAttr ProductAttr[]
 }
 
 model Variant {
-  id        String   @id            // Shopify gid
+  id        String   @id // Shopify gid
   productId String
   product   Product  @relation(fields: [productId], references: [id])
   title     String?
   sku       String?
-  size      String?  // option1 (if used)
-  color     String?  // option2 (if used)
+  size      String? // option1 (if used)
+  color     String? // option2 (if used)
   updatedAt DateTime @updatedAt
+
   @@index([productId])
 }
 
 model OrderLine {
-  id         String   @id           // Shopify lineItem gid
-  orderId    String
-  createdAt  DateTime
-  productId  String?
-  variantId  String?
-  qty        Int
-  currency   String
-  netAmount  Decimal  @db.Decimal(18, 2)
+  id        String   @id // Shopify lineItem gid
+  orderId   String
+  createdAt DateTime
+  productId String?
+  variantId String?
+  qty       Int
+  currency  String
+  netAmount Decimal  @db.Decimal(18, 2)
 
   @@index([createdAt])
   @@index([productId])
@@ -68,4 +74,26 @@ model IngestCursor {
   shop      String   @id
   sinceISO  String
   updatedAt DateTime @updatedAt
+}
+
+model ProductAttr {
+  productId String  @id
+  category  String?
+  season    String?
+  gender    String?
+  lifecycle String? // e.g. NEW_IN | CORE | MARKDOWN
+  product   Product @relation(fields: [productId], references: [id])
+}
+
+model InventorySnapshot {
+  id           String   @id @default(cuid())
+  snapshotDate DateTime // store midnight UTC for dedupe
+  productId    String
+  variantId    String
+  onHand       Int
+  price        Decimal? @db.Decimal(10, 2)
+  cost         Decimal? @db.Decimal(10, 2)
+
+  @@index([snapshotDate])
+  @@index([variantId, snapshotDate])
 }
