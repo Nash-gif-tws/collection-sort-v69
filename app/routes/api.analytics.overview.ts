@@ -1,11 +1,11 @@
 // app/routes/api.analytics.overview.ts
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { authenticate } from "~/shopify.server";
+import { ensureAdminOrJsonReauth } from "~/server/reauth.server";
 import { prisma } from "~/db.server";
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await authenticate.admin(request);
+  await ensureAdminOrJsonReauth(request);
 
   const url = new URL(request.url);
   const fromISO =
