@@ -32,6 +32,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       features: { bundles: true, combinedListings: true },
     });
   } catch {
+    // top-level auth bounce (never inside iframe)
     const url = new URL(request.url);
     const shop = url.searchParams.get("shop") || "";
     const host = url.searchParams.get("host") || "";
@@ -39,6 +40,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     if (shop) qs.push(`shop=${encodeURIComponent(shop)}`);
     if (host) qs.push(`host=${encodeURIComponent(host)}`);
     const target = `/auth${qs.length ? `?${qs.join("&")}` : ""}`;
+
     const html = `<!doctype html><html><head><meta charset="utf-8"/></head><body>
 <script>
   (function () {
@@ -60,7 +62,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 type SearchItem = {
-  id: string; // variant GID
+  id: string; // variant GID (our search API returns 'id' for variant)
   productId?: string;
   productTitle?: string;
   vendor?: string;
@@ -86,73 +88,55 @@ export default function PackagesPage() {
   const [lines, setLines] = useState<PickLine[]>([]);
   const debRef = useRef<number | null>(null);
 
- async function runSearch(term: string) {
-  if (!term) {
-    setResults([]);
-    return;
-  }
-  setSearchBusy(true);
-  setMsg(null);
-  try {
-    // IMPORTANT: uses DOT route name, not a hyphen
-    const r = await fetch(
-      `/api/products.search?q=${encodeURIComponent(term)}&first=10`,
-      { credentials: "include" }
-    );
-    const ct = r.headers.get("content-type") || "";
-
-    if (r.status === 401 && ct.includes("application/json")) {
-      const body = await r.json();
-      if (body?.reauthUrl) {
-        if (window.top === window.self) window.location.href = body.reauthUrl;
-        else window.top!.location.href = body.reauthUrl;
-        return;
-      }
-    }
-
-    const data = ct.includes("application/json")
-      ? await r.json()
-      : { ok: false, error: "Non-JSON response" };
-
-    if (!data.ok) {
+  // ---- SEARCH ----
+  async function runSearch(term: string) {
+    if (!term) {
       setResults([]);
-      setMsg(`Error: ${data.error || "Search failed."}`);
-    } else {
-      setResults(data.items || []);
-      if (!data.items?.length) {
-        // optional: show a gentle hint when nothing found
-        setMsg(null); // or setMsg("No matches.");
-      }
+      return;
     }
-  } catch (e: any) {
-    setMsg(`Error: ${e?.message || String(e)}`);
-    setResults([]);
-  } finally {
-    setSearchBusy(false);
-  }
-}
+    setSearchBusy(true);
+    setMsg(null);
+    try {
+      // IMPORTANT: route name uses a DOT (products.search)
+      const r = await fetch(
+        `/api/products.search?q=${encodeURIComponent(term)}&first=10`,
+        { credentials: "include" }
+      );
+      const ct = r.headers.get("content-type") || "";
+
+      if (r.status === 401 && ct.includes("application/json")) {
+        const body = await r.json();
+        if (body?.reauthUrl) {
+          if (window.top === window.self) window.location.href = body.reauthUrl;
+          else window.top!.location.href = body.reauthUrl;
+          return;
+        }
+      }
+
       const data = ct.includes("application/json")
         ? await r.json()
-        : { ok: false, items: [] };
+        : { ok: false, error: "Non-JSON response" };
+
       if (!data.ok) {
         setResults([]);
-        setMsg(data.error || "Search failed.");
+        setMsg(`Error: ${data.error || "Search failed."}`);
       } else {
-        // Our API returns {items}
         setResults(data.items || []);
       }
     } catch (e: any) {
-      setMsg(e?.message || String(e));
+      setMsg(`Error: ${e?.message || String(e)}`);
       setResults([]);
     } finally {
       setSearchBusy(false);
     }
   }
 
-  // Debounce search
+  // Debounce search calls; do not 'await' inside this callback
   useEffect(() => {
     if (debRef.current) window.clearTimeout(debRef.current);
-    debRef.current = window.setTimeout(() => runSearch(q), 250);
+    debRef.current = window.setTimeout(() => {
+      void runSearch(q);
+    }, 250);
     return () => {
       if (debRef.current) window.clearTimeout(debRef.current);
     };
@@ -175,10 +159,14 @@ export default function PackagesPage() {
     setLines((cur) => cur.filter((l) => l.variantId !== variantId));
   }
 
+  // ---- CREATE BUNDLE ----
   async function createBundle() {
     setBusy(true);
     setMsg(null);
     try {
+      if (!bundleTitle.trim()) throw new Error("Please enter a bundle title");
+      if (lines.length === 0) throw new Error("Add at least one component");
+
       const payload = {
         title: bundleTitle.trim(),
         components: lines.map((l) => ({ variantId: l.variantId, qty: l.qty })),
@@ -209,7 +197,7 @@ export default function PackagesPage() {
           data.capacity ? ` (capacity ${data.capacity})` : ""
         }`
       );
-      // Optionally reset:
+      // Optional reset:
       // setBundleTitle("");
       // setLines([]);
     } catch (e: any) {
@@ -237,7 +225,7 @@ export default function PackagesPage() {
       <Layout>
         <Layout.Section>
           <Card>
-            <Tabs tabs={tabs} selected={tab} onSelect={setTab}>
+            <Tabs tabs={tabs} selected={tab} onSelect={(i) => setTab(i)}>
               {tab === 0 && (
                 <div id="bundle-panel" style={{ padding: 16 }}>
                   <BlockStack gap="400">
@@ -249,7 +237,7 @@ export default function PackagesPage() {
                       <TextField
                         label="Bundle title"
                         value={bundleTitle}
-                        onChange={setBundleTitle}
+                        onChange={(v) => setBundleTitle(v)}
                         autoComplete="off"
                         placeholder="e.g. Snowboard + Bindings Bundle"
                       />
@@ -260,7 +248,7 @@ export default function PackagesPage() {
                         <TextField
                           label="Search products / SKUs"
                           value={q}
-                          onChange={setQ}
+                          onChange={(v) => setQ(v)}
                           autoComplete="off"
                           placeholder="Type title, SKU or vendor…"
                         />
@@ -333,9 +321,7 @@ export default function PackagesPage() {
                     )}
 
                     {msg && (
-                      <Banner
-                        tone={msg.startsWith("Error") ? "critical" : "success"}
-                      >
+                      <Banner tone={msg.startsWith("Error") ? "critical" : "success"}>
                         {msg}
                       </Banner>
                     )}
