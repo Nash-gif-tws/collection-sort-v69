@@ -27,13 +27,11 @@ export const headers: HeadersFunction = () => ({
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     await authenticate.admin(request);
-    // Force-enable features here so UI never depends on /api/features
     return json({
       ok: true,
       features: { bundles: true, combinedListings: true },
     });
   } catch {
-    // ensure top-level auth rather than iframe loop
     const url = new URL(request.url);
     const shop = url.searchParams.get("shop") || "";
     const host = url.searchParams.get("host") || "";
@@ -62,35 +60,32 @@ export async function loader({ request }: LoaderFunctionArgs) {
 }
 
 type SearchItem = {
-  id: string;            // variant gid
-  productId: string;
-  productTitle: string;
+  id: string; // variant GID
+  productId?: string;
+  productTitle?: string;
   vendor?: string;
-  variantId: string;
-  variantTitle: string;
   sku?: string;
   options?: Array<{ name: string; value: string }>;
   label: string;
 };
 
-type PickLine = { id: string; variantId: string; label: string; qty: number };
+type PickLine = { variantId: string; label: string; qty: number };
 
 export default function PackagesPage() {
   const { features } = useLoaderData<typeof loader>();
 
-  const [tab, setTab] = useState(0); // 0=bundle, 1=joined listing
-  const [msg, setMsg] = useState<string | null>(null);
+  const [tab, setTab] = useState(0); // 0=bundle, 1=joined
   const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
 
-  // --- Search state (Bundle tab) ---
+  // Bundle state
+  const [bundleTitle, setBundleTitle] = useState("");
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchItem[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [lines, setLines] = useState<PickLine[]>([]);
-
   const debRef = useRef<number | null>(null);
 
-  // Do search against our endpoint; handle auth bounce (401 with JSON) safely
   async function runSearch(term: string) {
     if (!term) {
       setResults([]);
@@ -99,26 +94,30 @@ export default function PackagesPage() {
     setSearchBusy(true);
     setMsg(null);
     try {
-      const r = await fetch(`/api/products-search?q=${encodeURIComponent(term)}&first=10`, {
-        credentials: "include",
-      });
+      // IMPORTANT: route name uses a DOT, not a hyphen:
+      const r = await fetch(
+        `/api/products.search?q=${encodeURIComponent(term)}&first=10`,
+        { credentials: "include" }
+      );
       const ct = r.headers.get("content-type") || "";
-      if (r.status === 401) {
-        // If our API returns {reauthUrl}, bounce top-level once
-        const body = ct.includes("application/json") ? await r.json() : null;
+      // Optional reauth bounce
+      if (r.status === 401 && ct.includes("application/json")) {
+        const body = await r.json();
         if (body?.reauthUrl) {
           if (window.top === window.self) window.location.href = body.reauthUrl;
           else window.top!.location.href = body.reauthUrl;
           return;
         }
       }
-      const data = ct.includes("application/json") ? await r.json() : { ok: false, items: [] };
+      const data = ct.includes("application/json")
+        ? await r.json()
+        : { ok: false, items: [] };
       if (!data.ok) {
-        setMsg(data.error || "Search failed.");
         setResults([]);
+        setMsg(data.error || "Search failed.");
       } else {
-        const arr: SearchItem[] = data.items || data.results || data.data || [];
-        setResults(arr);
+        // Our API returns {items}
+        setResults(data.items || []);
       }
     } catch (e: any) {
       setMsg(e?.message || String(e));
@@ -128,7 +127,7 @@ export default function PackagesPage() {
     }
   }
 
-  // Debounced search
+  // Debounce search
   useEffect(() => {
     if (debRef.current) window.clearTimeout(debRef.current);
     debRef.current = window.setTimeout(() => runSearch(q), 250);
@@ -139,12 +138,14 @@ export default function PackagesPage() {
 
   function addLine(item: SearchItem) {
     setLines((cur) => {
-      if (cur.some((x) => x.variantId === item.variantId)) return cur;
-      return [...cur, { id: item.id, variantId: item.variantId, label: item.label, qty: 1 }];
+      const variantId = item.id; // API uses id as variant GID
+      if (cur.some((x) => x.variantId === variantId)) return cur;
+      return [...cur, { variantId, label: item.label, qty: 1 }];
     });
   }
 
-  function setQty(variantId: string, qty: number) {
+  function setQty(variantId: string, qtyStr: string) {
+    const qty = Math.max(1, parseInt(qtyStr || "1", 10) || 1);
     setLines((cur) => cur.map((l) => (l.variantId === variantId ? { ...l, qty } : l)));
   }
 
@@ -153,48 +154,49 @@ export default function PackagesPage() {
   }
 
   async function createBundle() {
-  setMsg(null);
+    setBusy(true);
+    setMsg(null);
+    try {
+      const payload = {
+        title: bundleTitle.trim(),
+        components: lines.map((l) => ({ variantId: l.variantId, qty: l.qty })),
+      };
 
-  const payload = {
-    title: bundleTitle.trim(),
-    components: selected.map(c => ({
-      variantId: c.variantId,
-      qty: Number(qtys[c.variantId] || 1),
-    })),
-  };
+      const res = await fetch("/api/bundles.create", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-  try {
-    const res = await fetch("/api/bundles.create", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+      const ct = res.headers.get("content-type") || "";
+      const text = await res.text();
+      const data = ct.includes("application/json")
+        ? JSON.parse(text)
+        : { ok: false, error: text };
 
-    const text = await res.text();
-    const isJson = (res.headers.get("content-type") || "").includes("application/json");
-    const data = isJson ? JSON.parse(text) : { ok: false, error: text };
+      if (res.status === 401 && (data as any)?.reauthUrl) {
+        window.top!.location.href = (data as any).reauthUrl;
+        return;
+      }
 
-    // Reauth guard (if the route asks you to reauthenticate)
-    if (res.status === 401 && (data as any)?.reauthUrl) {
-      window.top.location.href = (data as any).reauthUrl;
-      return;
+      if (!data.ok) throw new Error(data.error || res.statusText);
+
+      setMsg(
+        `Bundle created ✓ productId: ${data.productId}${
+          data.capacity ? ` (capacity ${data.capacity})` : ""
+        }`
+      );
+      // Optionally reset:
+      // setBundleTitle("");
+      // setLines([]);
+    } catch (e: any) {
+      setMsg(`Error: ${e?.message || String(e)}`);
+    } finally {
+      setBusy(false);
     }
-
-    if (!res.ok || !data.ok) {
-      setMsg(`Error: ${(data as any).error || res.statusText}`);
-      return;
-    }
-
-    setMsg(`Bundle created: ${data.productId} (capacity ${data.bundleAvailable})`);
-    // clear selections if you want:
-    // setSelected([]);
-  } catch (err: any) {
-    setMsg(`Error: ${err?.message || String(err)}`);
   }
-}
 
-  // Tabs (force enable combined listings; we can wire real checks later)
   const tabs = useMemo(
     () => [
       { id: "bundle", content: "Package / Bundle", panelID: "bundle-panel" },
@@ -202,8 +204,7 @@ export default function PackagesPage() {
         id: "joined",
         content: "Joined Listing",
         panelID: "joined-panel",
-        // DO NOT disable; we want it clickable now:
-        disabled: false && !features?.combinedListings,
+        disabled: false, // keep clickable
       },
     ],
     [features]
@@ -221,6 +222,16 @@ export default function PackagesPage() {
                     <Text as="p" tone="subdued">
                       Build a bundle by searching variants and adding quantities.
                     </Text>
+
+                    <div style={{ maxWidth: 480 }}>
+                      <TextField
+                        label="Bundle title"
+                        value={bundleTitle}
+                        onChange={setBundleTitle}
+                        autoComplete="off"
+                        placeholder="e.g. Snowboard + Bindings Bundle"
+                      />
+                    </div>
 
                     <InlineStack gap="400" wrap={false} align="start">
                       <div style={{ minWidth: 360 }}>
@@ -276,10 +287,9 @@ export default function PackagesPage() {
                                   labelHidden
                                   type="number"
                                   value={String(l.qty)}
-                                  onChange={(v) => setQty(l.variantId, Math.max(1, parseInt(v || "1", 10) || 1))}
+                                  onChange={(v) => setQty(l.variantId, v)}
                                   autoComplete="off"
                                   min={1}
-                                  style={{ width: 90 }}
                                 />
                                 <Button tone="critical" onClick={() => removeLine(l.variantId)}>
                                   Remove
@@ -288,8 +298,12 @@ export default function PackagesPage() {
                             </InlineStack>
                           ))}
                           <InlineStack gap="400">
-                            <Button primary onClick={createBundle} disabled={busy}>
-                              {busy ? "Working…" : "Create bundle"}
+                            <Button
+                              primary
+                              onClick={createBundle}
+                              disabled={busy || !bundleTitle.trim() || lines.length === 0}
+                            >
+                              {busy ? "Creating…" : "Create bundle"}
                             </Button>
                           </InlineStack>
                         </BlockStack>
@@ -297,7 +311,9 @@ export default function PackagesPage() {
                     )}
 
                     {msg && (
-                      <Banner tone={msg.startsWith("Error") || msg.startsWith("Failed") ? "critical" : "success"}>
+                      <Banner
+                        tone={msg.startsWith("Error") ? "critical" : "success"}
+                      >
                         {msg}
                       </Banner>
                     )}
@@ -309,10 +325,12 @@ export default function PackagesPage() {
                 <div id="joined-panel" style={{ padding: 16 }}>
                   <BlockStack gap="400">
                     <Text as="p" tone="subdued">
-                      Joined listings (Plus): combine multiple child products under one parent. UI coming next.
+                      Joined listings (Plus): combine multiple child products under
+                      one parent. UI coming next.
                     </Text>
                     <Banner tone="info">
-                      This tab is intentionally enabled. We’ll wire mutations after search & bundle creation are verified.
+                      This tab is enabled. We’ll wire mutations after bundle
+                      creation is verified.
                     </Banner>
                   </BlockStack>
                 </div>
