@@ -1,36 +1,39 @@
 // app/server/reauth.server.ts
-import { json } from "@remix-run/node";
 import { authenticate } from "~/shopify.server";
 
 /**
- * Returns { shop, admin } from the Admin session, or throws JSON 401 with {reauthUrl}
- * so fetchers can redirect to top-level OAuth.
+ * Returns {admin, shop} when session is valid.
+ * If auth is required, returns {reauth: true, reauthUrl} with NO thrown redirect.
  */
-export async function requireAdminAndShop(request: Request) {
+export async function ensureAdminOrJsonReauth(request: Request): Promise<
+  | { admin: any; shop: string; reauth: false }
+  | { admin: null; shop: string; reauth: true; reauthUrl: string }
+> {
   try {
-    const { session, admin } = await authenticate.admin(request);
-    return { shop: session.shop, admin };
-  } catch {
-    const url = new URL(request.url);
-    const shop = url.searchParams.get("shop") || "";
-    const host = url.searchParams.get("host") || "";
-    const qs: string[] = [];
-    if (shop) qs.push(`shop=${encodeURIComponent(shop)}`);
-    if (host) qs.push(`host=${encodeURIComponent(host)}`);
-    const reauthUrl = `/auth${qs.length ? `?${qs.join("&")}` : ""}`;
-    throw json({ ok: false, error: "reauth", reauthUrl }, { status: 401 });
+    const { admin, session } = await authenticate.admin(request);
+    return { admin, shop: session.shop, reauth: false };
+  } catch (err: unknown) {
+    // Build a top-level auth URL that works both inside/outside the iframe
+    const u = new URL(request.url);
+    const shop = u.searchParams.get("shop") || "";
+    const host = u.searchParams.get("host") || "";
+    const qs = new URLSearchParams();
+    if (shop) qs.set("shop", shop);
+    if (host) qs.set("host", host);
+    const reauthUrl = `/auth${qs.toString() ? `?${qs}` : ""}`;
+    return { admin: null, shop, reauth: true, reauthUrl };
   }
 }
 
-/** Back-compat helper that returns only the shop string. */
-export async function requireShopAdmin(request: Request) {
-  const { shop } = await requireAdminAndShop(request);
-  return shop;
+/** Old helper some routes may import */
+export async function requireAdminAndShop(request: Request) {
+  const res = await ensureAdminOrJsonReauth(request);
+  if ("reauth" in res && res.reauth) {
+    // Keep previous behavior for old routes: throw a 401 JSON
+    throw new Response(JSON.stringify({ ok: false, reauthUrl: res.reauthUrl }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  return res;
 }
-
-/**
- * BACKWARDS COMPAT ALIAS:
- * Some routes import { ensureAdminOrJsonReauth } expecting the same return as requireAdminAndShop.
- * Export it as an alias so those imports keep working without code changes.
- */
-export const ensureAdminOrJsonReauth = requireAdminAndShop;
