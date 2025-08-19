@@ -97,3 +97,54 @@ model InventorySnapshot {
   @@index([snapshotDate])
   @@index([variantId, snapshotDate])
 }
+
+// ---------- Packages (Bundles) ----------
+enum DiscountType {
+  PERCENT
+  FIXED
+}
+
+model BundleDef {
+  id              String        @id @default(cuid())
+  shop            String // myshop.myshopify.com (scope per store)
+  title           String
+  bundleProductId String? // gid://shopify/Product/... (created bundle parent)
+  discountType    DiscountType?
+  discountValue   Decimal?      @db.Decimal(10, 2)
+  createdAt       DateTime      @default(now())
+  items           BundleItem[]
+
+  @@index([shop])
+}
+
+model BundleItem {
+  id        String    @id @default(cuid())
+  bundleId  String
+  bundle    BundleDef @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  variantId String // gid://shopify/ProductVariant/...
+  quantity  Int       @default(1)
+
+  @@index([bundleId])
+}
+
+// ---------- Joined Listings (Plus) ----------
+model CombinedParent {
+  id              String          @id @default(cuid())
+  shop            String // scope per store
+  parentProductId String          @unique // gid://shopify/Product/... (PARENT)
+  title           String
+  createdAt       DateTime        @default(now())
+  children        CombinedChild[]
+
+  @@index([shop])
+}
+
+model CombinedChild {
+  id              String         @id @default(cuid())
+  parentId        String
+  parent          CombinedParent @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  productId       String // gid://shopify/Product/... (CHILD)
+  parentOptionMap Json? // optional mapping of parent options → child
+
+  @@index([parentId])
+}
