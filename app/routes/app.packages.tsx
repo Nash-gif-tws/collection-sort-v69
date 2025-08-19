@@ -99,7 +99,7 @@ export default function PackagesPage() {
     setSearchBusy(true);
     setMsg(null);
     try {
-      const r = await fetch(`/api/products.search?q=${encodeURIComponent(term)}&first=10`, {
+      const r = await fetch(`/api/products-search?q=${encodeURIComponent(term)}&first=10`, {
         credentials: "include",
       });
       const ct = r.headers.get("content-type") || "";
