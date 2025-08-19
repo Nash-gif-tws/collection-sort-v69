@@ -1,220 +1,315 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { useEffect, useMemo, useState } from "react";
-import { useFetcher, useLoaderData } from "@remix-run/react";
-import {
-  Page, Card, Tabs, BlockStack, InlineStack, TextField, Button, Banner, Autocomplete, Icon, Badge
-} from "@shopify/polaris";
-import { SearchIcon, DeleteIcon } from "@shopify/polaris-icons";
+// app/routes/app.packages.tsx
+import type { HeadersFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json } from "@remix-run/node";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "~/shopify.server";
+import {
+  Page,
+  Layout,
+  Card,
+  Tabs,
+  Text,
+  TextField,
+  Button,
+  Banner,
+  InlineStack,
+  BlockStack,
+  Badge,
+  Spinner,
+} from "@shopify/polaris";
+
+export const headers: HeadersFunction = () => ({
+  "Content-Security-Policy":
+    "frame-ancestors https://admin.shopify.com https://*.myshopify.com;",
+});
 
 export async function loader({ request }: LoaderFunctionArgs) {
-  await authenticate.admin(request);
-  const res = await fetch(new URL("/api.features", new URL(request.url)).toString(), {
-    headers: { cookie: request.headers.get("cookie") ?? "" },
-  });
-  const feat = await res.json().catch(()=>({}));
-  return json({ features: feat });
+  try {
+    await authenticate.admin(request);
+    // Force-enable features here so UI never depends on /api/features
+    return json({
+      ok: true,
+      features: { bundles: true, combinedListings: true },
+    });
+  } catch {
+    // ensure top-level auth rather than iframe loop
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop") || "";
+    const host = url.searchParams.get("host") || "";
+    const qs: string[] = [];
+    if (shop) qs.push(`shop=${encodeURIComponent(shop)}`);
+    if (host) qs.push(`host=${encodeURIComponent(host)}`);
+    const target = `/auth${qs.length ? `?${qs.join("&")}` : ""}`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"/></head><body>
+<script>
+  (function () {
+    var target = ${JSON.stringify(target)};
+    if (window.top === window.self) { window.location.href = target; }
+    else { window.top.location.href = target; }
+  })();
+</script>
+</body></html>`;
+    return new Response(html, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Security-Policy":
+          "frame-ancestors https://admin.shopify.com https://*.myshopify.com;",
+      },
+    });
+  }
 }
 
-type PickItem = { label: string; variantId: string; productId: string; };
+type SearchItem = {
+  id: string;            // variant gid
+  productId: string;
+  productTitle: string;
+  vendor?: string;
+  variantId: string;
+  variantTitle: string;
+  sku?: string;
+  options?: Array<{ name: string; value: string }>;
+  label: string;
+};
+
+type PickLine = { id: string; variantId: string; label: string; qty: number };
 
 export default function PackagesPage() {
   const { features } = useLoaderData<typeof loader>();
-  const [tab, setTab] = useState(0);
 
-  // ---- Shared search picker (variants) ----
-  const [search, setSearch] = useState("");
-  const [options, setOptions] = useState<PickItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState(0); // 0=bundle, 1=joined listing
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    const t = setTimeout(async () => {
-      if (!search.trim()) { setOptions([]); return; }
-      setLoading(true);
-      const r = await fetch(`/api.products.search?q=${encodeURIComponent(search)}`);
-      const j = await r.json();
-      setOptions((j.items ?? []).map((it:any)=>({ label: it.label, variantId: it.variantId, productId: it.productId })));
-      setLoading(false);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [search]);
+  // --- Search state (Bundle tab) ---
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<SearchItem[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [lines, setLines] = useState<PickLine[]>([]);
 
-  // ---- Bundle builder ----
-  const [bundleTitle, setBundleTitle] = useState("");
-  const [bundleLines, setBundleLines] = useState<{variantId:string; label:string; qty:number}[]>([]);
-  const bundleFetcher = useFetcher();
+  const debRef = useRef<number | null>(null);
 
-  function addBundleLine(item: PickItem) {
-    setBundleLines(prev => [...prev, { variantId: item.variantId, label: item.label, qty: 1 }]);
-    setSearch(""); setOptions([]);
+  // Do search against our endpoint; handle auth bounce (401 with JSON) safely
+  async function runSearch(term: string) {
+    if (!term) {
+      setResults([]);
+      return;
+    }
+    setSearchBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch(`/api/products.search?q=${encodeURIComponent(term)}&first=10`, {
+        credentials: "include",
+      });
+      const ct = r.headers.get("content-type") || "";
+      if (r.status === 401) {
+        // If our API returns {reauthUrl}, bounce top-level once
+        const body = ct.includes("application/json") ? await r.json() : null;
+        if (body?.reauthUrl) {
+          if (window.top === window.self) window.location.href = body.reauthUrl;
+          else window.top!.location.href = body.reauthUrl;
+          return;
+        }
+      }
+      const data = ct.includes("application/json") ? await r.json() : { ok: false, items: [] };
+      if (!data.ok) {
+        setMsg(data.error || "Search failed.");
+        setResults([]);
+      } else {
+        const arr: SearchItem[] = data.items || data.results || data.data || [];
+        setResults(arr);
+      }
+    } catch (e: any) {
+      setMsg(e?.message || String(e));
+      setResults([]);
+    } finally {
+      setSearchBusy(false);
+    }
   }
-  function removeBundleLine(idx:number) {
-    setBundleLines(prev => prev.filter((_,i)=>i!==idx));
+
+  // Debounced search
+  useEffect(() => {
+    if (debRef.current) window.clearTimeout(debRef.current);
+    debRef.current = window.setTimeout(() => runSearch(q), 250);
+    return () => {
+      if (debRef.current) window.clearTimeout(debRef.current);
+    };
+  }, [q]);
+
+  function addLine(item: SearchItem) {
+    setLines((cur) => {
+      if (cur.some((x) => x.variantId === item.variantId)) return cur;
+      return [...cur, { id: item.id, variantId: item.variantId, label: item.label, qty: 1 }];
+    });
+  }
+
+  function setQty(variantId: string, qty: number) {
+    setLines((cur) => cur.map((l) => (l.variantId === variantId ? { ...l, qty } : l)));
+  }
+
+  function removeLine(variantId: string) {
+    setLines((cur) => cur.filter((l) => l.variantId !== variantId));
   }
 
   async function createBundle() {
-    const payload = {
-      title: bundleTitle || "Package",
-      items: bundleLines.map(l => ({ variantId: l.variantId, quantity: l.qty })),
-    };
-    bundleFetcher.submit({ __payload: JSON.stringify(payload) }, {
-      method: "post",
-      action: "/api.bundles.create",
-      encType: "application/x-www-form-urlencoded",
-    });
+    if (!lines.length) {
+      setMsg("Add at least one component.");
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch("/api/bundles.create", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          components: lines.map((l) => ({ variantId: l.variantId, quantity: l.qty })),
+          title: `Bundle (${new Date().toISOString().slice(0, 10)})`,
+        }),
+      });
+      const data = await r.json().catch(() => ({ ok: false, error: "Bad JSON" }));
+      if (data.ok) {
+        setMsg(`Bundle created: ${data.productHandle || "success"}`);
+        setLines([]);
+      } else {
+        setMsg(`Error: ${data.error || "Failed to create bundle"}`);
+      }
+    } catch (e: any) {
+      setMsg(`Failed: ${e?.message || String(e)}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  // ---- Combined listing (Plus) ----
-  const supportsCL = !!features?.supportsCombinedListings;
-  const combinedFetcher = useFetcher();
-  const [parentTitle, setParentTitle] = useState("");
-  const [optionName, setOptionName] = useState("Style");
-  const [optionValues, setOptionValues] = useState("A,B,C");
-  const [children, setChildren] = useState<{ childProductId: string; selectedParentOptionValues: {name:string;value:string}[]; label: string }[]>([]);
-
-  function addChildFromVariant(item: PickItem) {
-    // Minimal: map each child product to one parent option value (first value)
-    const values = optionValues.split(",").map(s=>s.trim()).filter(Boolean);
-    const first = values[children.length] || values[0] || "A";
-    setChildren(prev => [...prev, {
-      childProductId: item.productId,
-      selectedParentOptionValues: [{ name: optionName, value: first }],
-      label: item.label,
-    }]);
-    setSearch(""); setOptions([]);
-  }
-  function removeChild(idx:number) { setChildren(prev => prev.filter((_,i)=>i!==idx)); }
-
-  async function createCombined() {
-    const payload = {
-      parentTitle: parentTitle || "Joined Listing",
-      options: [{ name: optionName, values: optionValues.split(",").map(s=>s.trim()).filter(Boolean) }],
-      children,
-    };
-    combinedFetcher.submit({ __payload: JSON.stringify(payload) }, {
-      method: "post",
-      action: "/api.combined.create",
-      encType: "application/x-www-form-urlencoded",
-    });
-  }
+  // Tabs (force enable combined listings; we can wire real checks later)
+  const tabs = useMemo(
+    () => [
+      { id: "bundle", content: "Package / Bundle", panelID: "bundle-panel" },
+      {
+        id: "joined",
+        content: "Joined Listing",
+        panelID: "joined-panel",
+        // DO NOT disable; we want it clickable now:
+        disabled: false && !features?.combinedListings,
+      },
+    ],
+    [features]
+  );
 
   return (
     <Page title="Packages & Joined Listings">
-      <Tabs tabs={[
-        { id: "bundle", content: "Package / Bundle" },
-        { id: "joined", content: "Joined Listing", disabled: !supportsCL }
-      ]} selected={tab} onSelect={setTab}>
-        <div style={{ marginTop: 16 }}>
-          {tab === 0 && (
-            <Card>
-              <BlockStack gap="400">
-                <TextField label="Bundle title" value={bundleTitle} onChange={setBundleTitle} autoComplete="off" />
+      <Layout>
+        <Layout.Section>
+          <Card>
+            <Tabs tabs={tabs} selected={tab} onSelect={setTab}>
+              {tab === 0 && (
+                <div id="bundle-panel" style={{ padding: 16 }}>
+                  <BlockStack gap="400">
+                    <Text as="p" tone="subdued">
+                      Build a bundle by searching variants and adding quantities.
+                    </Text>
 
-                <Autocomplete
-                  options={options}
-                  selected={[]}
-                  onSelect={(sel) => {
-                    const id = sel[0] as string;
-                    const item = options.find(o => o.variantId === id);
-                    if (item) addBundleLine(item);
-                  }}
-                  inputValue={search}
-                  onInputChange={setSearch}
-                  loading={loading}
-                  textField={
-                    <Autocomplete.TextField
-                      label="Add component by search"
-                      value={search}
-                      onChange={setSearch}
-                      prefix={<Icon source={SearchIcon} />}
-                      placeholder="Search product or SKU…"
-                      autoComplete="off"
-                    />
-                  }
-                />
-
-                {bundleLines.map((l, idx) => (
-                  <InlineStack key={idx} gap="200" align="start">
-                    <Badge>{l.label}</Badge>
-                    <TextField
-                      label="Qty"
-                      type="number"
-                      value={String(l.qty)}
-                      onChange={(v)=> setBundleLines(prev => prev.map((x,i)=> i===idx ? {...x, qty: Number(v)||1 } : x))}
-                      autoComplete="off"
-                    />
-                    <Button icon={DeleteIcon} onClick={()=>removeBundleLine(idx)} />
-                  </InlineStack>
-                ))}
-
-                <InlineStack gap="400">
-                  <Button primary onClick={createBundle} disabled={!bundleLines.length || bundleFetcher.state!=="idle"}>
-                    {bundleFetcher.state === "submitting" ? "Creating…" : "Create bundle"}
-                  </Button>
-                </InlineStack>
-
-                {bundleFetcher.data?.error && <Banner tone="critical">{String(bundleFetcher.data.error)}</Banner>}
-                {bundleFetcher.data?.ok && <Banner tone="success">Bundle created: {bundleFetcher.data.bundleProductId}</Banner>}
-              </BlockStack>
-            </Card>
-          )}
-
-          {tab === 1 && (
-            <Card title="Joined Listing (Shopify Plus)">
-              {!supportsCL ? (
-                <Banner tone="warning">Your store isn’t on Plus, so native Combined Listings aren’t available. Use a theme app extension fallback to simulate a single PDP.</Banner>
-              ) : (
-                <BlockStack gap="400">
-                  <TextField label="Parent title" value={parentTitle} onChange={setParentTitle} autoComplete="off" />
-                  <InlineStack gap="200">
-                    <TextField label="Parent option name" value={optionName} onChange={setOptionName} autoComplete="off" />
-                    <TextField label="Option values (comma-separated)" value={optionValues} onChange={setOptionValues} autoComplete="off" />
-                  </InlineStack>
-
-                  <Autocomplete
-                    options={options.map(o=>({ ...o, value: o.productId }))}
-                    selected={[]}
-                    onSelect={(sel) => {
-                      const productId = sel[0] as string;
-                      const first = options.find(o => o.productId === productId);
-                      if (first) addChildFromVariant(first);
-                    }}
-                    inputValue={search}
-                    onInputChange={setSearch}
-                    loading={loading}
-                    textField={
-                      <Autocomplete.TextField
-                        label="Add child product by searching any of its variants"
-                        value={search}
-                        onChange={setSearch}
-                        prefix={<Icon source={SearchIcon} />}
-                        placeholder="Search product…"
-                        autoComplete="off"
-                      />
-                    }
-                  />
-
-                  {children.map((c, idx) => (
-                    <InlineStack key={idx} gap="200" align="start">
-                      <Badge>{c.label}</Badge>
-                      <Button icon={DeleteIcon} onClick={()=>removeChild(idx)} />
+                    <InlineStack gap="400" wrap={false} align="start">
+                      <div style={{ minWidth: 360 }}>
+                        <TextField
+                          label="Search products / SKUs"
+                          value={q}
+                          onChange={setQ}
+                          autoComplete="off"
+                          placeholder="Type title, SKU or vendor…"
+                        />
+                      </div>
+                      {searchBusy && (
+                        <InlineStack gap="200" align="center">
+                          <Spinner size="small" />
+                          <Text as="span">Searching…</Text>
+                        </InlineStack>
+                      )}
                     </InlineStack>
-                  ))}
 
-                  <InlineStack gap="400">
-                    <Button primary onClick={createCombined} disabled={!children.length || combinedFetcher.state!=="idle"}>
-                      {combinedFetcher.state === "submitting" ? "Creating…" : "Create joined listing"}
-                    </Button>
-                  </InlineStack>
+                    {results.length > 0 && (
+                      <Card>
+                        <BlockStack gap="200">
+                          <Text as="h3" variant="headingSm">
+                            Results
+                          </Text>
+                          {results.slice(0, 12).map((it) => (
+                            <InlineStack key={it.id} gap="300" align="space-between">
+                              <div>
+                                <Text as="span">{it.label}</Text>{" "}
+                                {it.sku ? <Badge tone="info">{it.sku}</Badge> : null}
+                              </div>
+                              <Button onClick={() => addLine(it)}>Add</Button>
+                            </InlineStack>
+                          ))}
+                        </BlockStack>
+                      </Card>
+                    )}
 
-                  {combinedFetcher.data?.error && <Banner tone="critical">{String(combinedFetcher.data.error)}</Banner>}
-                  {combinedFetcher.data?.ok && <Banner tone="success">Created parent: {combinedFetcher.data.parentProductId}</Banner>}
-                </BlockStack>
+                    {lines.length > 0 && (
+                      <Card>
+                        <BlockStack gap="300">
+                          <Text as="h3" variant="headingSm">
+                            Components
+                          </Text>
+                          {lines.map((l) => (
+                            <InlineStack key={l.variantId} gap="300" align="space-between">
+                              <div style={{ maxWidth: "70%" }}>
+                                <Text as="span">{l.label}</Text>
+                              </div>
+                              <InlineStack gap="200" align="center">
+                                <TextField
+                                  label="Qty"
+                                  labelHidden
+                                  type="number"
+                                  value={String(l.qty)}
+                                  onChange={(v) => setQty(l.variantId, Math.max(1, parseInt(v || "1", 10) || 1))}
+                                  autoComplete="off"
+                                  min={1}
+                                  style={{ width: 90 }}
+                                />
+                                <Button tone="critical" onClick={() => removeLine(l.variantId)}>
+                                  Remove
+                                </Button>
+                              </InlineStack>
+                            </InlineStack>
+                          ))}
+                          <InlineStack gap="400">
+                            <Button primary onClick={createBundle} disabled={busy}>
+                              {busy ? "Working…" : "Create bundle"}
+                            </Button>
+                          </InlineStack>
+                        </BlockStack>
+                      </Card>
+                    )}
+
+                    {msg && (
+                      <Banner tone={msg.startsWith("Error") || msg.startsWith("Failed") ? "critical" : "success"}>
+                        {msg}
+                      </Banner>
+                    )}
+                  </BlockStack>
+                </div>
               )}
-            </Card>
-          )}
-        </div>
-      </Tabs>
+
+              {tab === 1 && (
+                <div id="joined-panel" style={{ padding: 16 }}>
+                  <BlockStack gap="400">
+                    <Text as="p" tone="subdued">
+                      Joined listings (Plus): combine multiple child products under one parent. UI coming next.
+                    </Text>
+                    <Banner tone="info">
+                      This tab is intentionally enabled. We’ll wire mutations after search & bundle creation are verified.
+                    </Banner>
+                  </BlockStack>
+                </div>
+              )}
+            </Tabs>
+          </Card>
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 }
