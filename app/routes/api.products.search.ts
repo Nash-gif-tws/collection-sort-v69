@@ -1,90 +1,96 @@
 // app/routes/api.products.search.ts
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { ensureAdminOrJsonReauth } from "~/server/reauth.server";
+import { requireAdminAndShop } from "~/server/reauth.server";
 
-async function doSearch(request: Request) {
-  const auth = await ensureAdminOrJsonReauth(request);
-  if ("reauth" in auth && auth.reauth) {
-    return json({ ok: false, reauthUrl: auth.reauthUrl }, { status: 401 });
-  }
+/**
+ * GET /api/products.search?q=term&first=10
+ * Returns lightweight items for the bundle component picker.
+ */
+export async function loader({ request }: LoaderFunctionArgs) {
+  // Ensure we have an Admin API client (and session)
+  try {
+    const { admin } = await requireAdminAndShop(request);
 
-  const { admin } = auth;
-  const url = new URL(request.url);
-  let q = (url.searchParams.get("q") || "").trim();
-  let first = Math.min(
-    Math.max(parseInt(url.searchParams.get("first") || "10", 10) || 10, 1),
-    25
-  );
+    const url = new URL(request.url);
+    const qRaw = (url.searchParams.get("q") || "").trim();
+    const first = Math.min(
+      Math.max(parseInt(url.searchParams.get("first") || "10", 10) || 10, 1),
+      25
+    );
 
-  // Also support POST body {q, first}
-  if (request.method === "POST") {
-    const form = await request.formData();
-    q = (form.get("q")?.toString() || q).trim();
-    const f = parseInt(form.get("first")?.toString() || "", 10);
-    if (!Number.isNaN(f)) first = Math.min(Math.max(f, 1), 25);
-  }
+    if (!qRaw) return json({ ok: true, items: [] });
 
-  if (!q) return json({ ok: true, items: [] });
+    // Broaden search: title, sku, vendor (wildcards supported)
+    const query = `title:*${qRaw}* OR sku:*${qRaw}* OR vendor:*${qRaw}*`;
 
-  const query = `title:*${q}* OR sku:*${q}* OR vendor:*${q}*`;
+    const resp = await admin.graphql(
+      `#graphql
+      query ProductSearch($query: String!, $first: Int!) {
+        products(first: $first, query: $query) {
+          edges {
+            node {
+              id
+              title
+              vendor
+              variants(first: 50) {
+                edges {
+                  node {
+                    id
+                    title
+                    sku
+                    selectedOptions { name value }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }`,
+      { variables: { query, first } }
+    );
 
-  const resp = await admin.graphql(
-    `#graphql
-     query ProductSearch($query: String!, $first: Int!) {
-       products(first: $first, query: $query) {
-         edges {
-           node {
-             id
-             title
-             vendor
-             variants(first: 50) {
-               edges {
-                 node {
-                   id
-                   title
-                   sku
-                   selectedOptions { name value }
-                 }
-               }
-             }
-           }
-         }
-       }
-     }`,
-    { variables: { query, first } }
-  );
+    const payload = await resp.json();
 
-  const data = await resp.json();
-  if (data?.errors?.length) {
-    return json({ ok: false, error: data.errors[0]?.message || "GraphQL error" }, { status: 500 });
-  }
+    // If Shopify responds with GraphQL errors, surface them cleanly
+    if (payload?.errors?.length) {
+      const msg =
+        payload.errors.map((e: any) => e.message).join("; ") || "GraphQL error";
+      return json({ ok: false, error: msg }, { status: 200 });
+    }
 
-  const items =
-    data?.data?.products?.edges?.flatMap((e: any) => {
-      const p = e?.node ?? {};
-      return p?.variants?.edges?.map((ve: any) => {
-        const v = ve?.node ?? {};
-        const optStr = (v?.selectedOptions ?? [])
-          .map((o: any) => `${o.name}:${o.value}`)
-          .join(" / ");
-        return {
-          id: v.id,                 // REQUIRED by pickers
-          productId: p.id,
-          productTitle: p.title,
-          vendor: p.vendor || "",
-          variantId: v.id,
-          variantTitle: v.title || "",
-          sku: v.sku || "",
-          options: v.selectedOptions || [],
-          label: [p.title, optStr || v.title].filter(Boolean).join(" — "),
-        };
+    const items =
+      payload?.data?.products?.edges?.flatMap((e: any) => {
+        const p = e.node;
+        return (
+          p?.variants?.edges?.map((ve: any) => {
+            const v = ve.node;
+            const opt =
+              v?.selectedOptions
+                ?.map((o: any) => `${o.name}:${o.value}`)
+                .join(" / ") || v?.title || "";
+            return {
+              id: v.id, // variant gid
+              productId: p.id,
+              productTitle: p.title,
+              vendor: p.vendor,
+              sku: v.sku || "",
+              options: v.selectedOptions || [],
+              label: [p.title, opt].filter(Boolean).join(" — "),
+            };
+          }) || []
+        );
       }) || [];
-    }) || [];
 
-  // Return multiple shapes some UIs expect
-  return json({ ok: true, items, results: items, data: items });
+    return json({ ok: true, items });
+  } catch (err: any) {
+    // If our auth guard wants a reauth, return 401+JSON so the client can bounce top-level
+    if (err?.reauthUrl) {
+      return json({ ok: false, reauthUrl: err.reauthUrl }, { status: 401 });
+    }
+    return json(
+      { ok: false, error: err?.message || String(err) },
+      { status: 200 }
+    );
+  }
 }
-
-export async function loader(args: LoaderFunctionArgs) { return doSearch(args.request); }
-export async function action(args: ActionFunctionArgs) { return doSearch(args.request); }

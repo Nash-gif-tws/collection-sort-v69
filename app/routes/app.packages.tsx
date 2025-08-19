@@ -86,29 +86,51 @@ export default function PackagesPage() {
   const [lines, setLines] = useState<PickLine[]>([]);
   const debRef = useRef<number | null>(null);
 
-  async function runSearch(term: string) {
-    if (!term) {
-      setResults([]);
-      return;
-    }
-    setSearchBusy(true);
-    setMsg(null);
-    try {
-      // IMPORTANT: route name uses a DOT, not a hyphen:
-      const r = await fetch(
-        `/api/products.search?q=${encodeURIComponent(term)}&first=10`,
-        { credentials: "include" }
-      );
-      const ct = r.headers.get("content-type") || "";
-      // Optional reauth bounce
-      if (r.status === 401 && ct.includes("application/json")) {
-        const body = await r.json();
-        if (body?.reauthUrl) {
-          if (window.top === window.self) window.location.href = body.reauthUrl;
-          else window.top!.location.href = body.reauthUrl;
-          return;
-        }
+ async function runSearch(term: string) {
+  if (!term) {
+    setResults([]);
+    return;
+  }
+  setSearchBusy(true);
+  setMsg(null);
+  try {
+    // IMPORTANT: uses DOT route name, not a hyphen
+    const r = await fetch(
+      `/api/products.search?q=${encodeURIComponent(term)}&first=10`,
+      { credentials: "include" }
+    );
+    const ct = r.headers.get("content-type") || "";
+
+    if (r.status === 401 && ct.includes("application/json")) {
+      const body = await r.json();
+      if (body?.reauthUrl) {
+        if (window.top === window.self) window.location.href = body.reauthUrl;
+        else window.top!.location.href = body.reauthUrl;
+        return;
       }
+    }
+
+    const data = ct.includes("application/json")
+      ? await r.json()
+      : { ok: false, error: "Non-JSON response" };
+
+    if (!data.ok) {
+      setResults([]);
+      setMsg(`Error: ${data.error || "Search failed."}`);
+    } else {
+      setResults(data.items || []);
+      if (!data.items?.length) {
+        // optional: show a gentle hint when nothing found
+        setMsg(null); // or setMsg("No matches.");
+      }
+    }
+  } catch (e: any) {
+    setMsg(`Error: ${e?.message || String(e)}`);
+    setResults([]);
+  } finally {
+    setSearchBusy(false);
+  }
+}
       const data = ct.includes("application/json")
         ? await r.json()
         : { ok: false, items: [] };
