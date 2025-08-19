@@ -153,35 +153,46 @@ export default function PackagesPage() {
   }
 
   async function createBundle() {
-    if (!lines.length) {
-      setMsg("Add at least one component.");
+  setMsg(null);
+
+  const payload = {
+    title: bundleTitle.trim(),
+    components: selected.map(c => ({
+      variantId: c.variantId,
+      qty: Number(qtys[c.variantId] || 1),
+    })),
+  };
+
+  try {
+    const res = await fetch("/api/bundles.create", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await res.text();
+    const isJson = (res.headers.get("content-type") || "").includes("application/json");
+    const data = isJson ? JSON.parse(text) : { ok: false, error: text };
+
+    // Reauth guard (if the route asks you to reauthenticate)
+    if (res.status === 401 && (data as any)?.reauthUrl) {
+      window.top.location.href = (data as any).reauthUrl;
       return;
     }
-    setBusy(true);
-    setMsg(null);
-    try {
-      const r = await fetch("/api/bundles.create", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          components: lines.map((l) => ({ variantId: l.variantId, quantity: l.qty })),
-          title: `Bundle (${new Date().toISOString().slice(0, 10)})`,
-        }),
-      });
-      const data = await r.json().catch(() => ({ ok: false, error: "Bad JSON" }));
-      if (data.ok) {
-        setMsg(`Bundle created: ${data.productHandle || "success"}`);
-        setLines([]);
-      } else {
-        setMsg(`Error: ${data.error || "Failed to create bundle"}`);
-      }
-    } catch (e: any) {
-      setMsg(`Failed: ${e?.message || String(e)}`);
-    } finally {
-      setBusy(false);
+
+    if (!res.ok || !data.ok) {
+      setMsg(`Error: ${(data as any).error || res.statusText}`);
+      return;
     }
+
+    setMsg(`Bundle created: ${data.productId} (capacity ${data.bundleAvailable})`);
+    // clear selections if you want:
+    // setSelected([]);
+  } catch (err: any) {
+    setMsg(`Error: ${err?.message || String(err)}`);
   }
+}
 
   // Tabs (force enable combined listings; we can wire real checks later)
   const tabs = useMemo(
