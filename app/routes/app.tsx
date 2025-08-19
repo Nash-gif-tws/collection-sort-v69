@@ -58,8 +58,7 @@ export default function App() {
         <Link to="/app" rel="home">Home</Link>
         <Link to="/app/sort">Sort</Link>
         <Link to="/app/analytics">Analytics</Link>
-        {/* Keep or remove as you like: */}
-        <Link to="/app/additional">Additional page</Link>
+       <Link to="/app/packages">Packages & Joined</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>
