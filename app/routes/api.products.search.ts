@@ -1,14 +1,8 @@
-// app/routes/api.products.search.ts
 import type {LoaderFunctionArgs} from "@remix-run/node";
 import {json} from "@remix-run/node";
 import {authenticate} from "~/shopify.server";
 
-/**
- * GET /api/products.search?q=term&first=10
- * Returns lightweight items (variants) for the bundle picker.
- */
 export async function loader({request}: LoaderFunctionArgs) {
-  // Always return JSON. If auth is missing, respond 401 with { reauthUrl }.
   const url = new URL(request.url);
   const qRaw = (url.searchParams.get("q") || "").trim();
   const first = Math.min(
@@ -18,10 +12,7 @@ export async function loader({request}: LoaderFunctionArgs) {
 
   if (!qRaw) return json({ok: true, items: []});
 
-  // Build a product search string (title/sku/vendor)
-  const query = `title:*${qRaw}* OR sku:*${qRaw}* OR vendor:*${qRaw}*`;
-
-  // Try to authenticate; if it fails, return JSON that the client can handle.
+  // Try auth; if missing, return JSON with reauthUrl
   let admin: any;
   try {
     const auth = await authenticate.admin(request);
@@ -35,6 +26,8 @@ export async function loader({request}: LoaderFunctionArgs) {
     const reauthUrl = `/auth${qs.length ? `?${qs.join("&")}` : ""}`;
     return json({ok: false, reauthUrl}, {status: 401});
   }
+
+  const query = `title:*${qRaw}* OR sku:*${qRaw}* OR vendor:*${qRaw}*`;
 
   try {
     const resp = await admin.graphql(
@@ -64,12 +57,8 @@ export async function loader({request}: LoaderFunctionArgs) {
     );
 
     const body = await resp.json();
-
     if (body?.errors?.length) {
-      return json(
-        {ok: false, error: body.errors[0]?.message || "GraphQL error"},
-        {status: 200}
-      );
+      return json({ok: false, error: body.errors[0]?.message || "GraphQL error"});
     }
 
     const items =
@@ -83,7 +72,7 @@ export async function loader({request}: LoaderFunctionArgs) {
               v?.title ||
               "";
             return {
-              id: v.id,                       // variant GID
+              id: v.id,
               productId: p.id,
               sku: v.sku || "",
               label: [p.title, optStr].filter(Boolean).join(" — "),
@@ -96,6 +85,6 @@ export async function loader({request}: LoaderFunctionArgs) {
 
     return json({ok: true, items});
   } catch (err: any) {
-    return json({ok: false, error: err?.message || String(err)}, {status: 200});
+    return json({ok: false, error: err?.message || String(err)});
   }
 }
