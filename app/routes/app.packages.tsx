@@ -99,9 +99,9 @@ export default function PackagesPage() {
     try {
       // IMPORTANT: route name uses a DOT (products.search)
       const r = await fetch(
-        `/api/products.search?q=${encodeURIComponent(term)}&first=10`,
-        { credentials: "include" }
-      );
+  `/api/products/search?q=${encodeURIComponent(term)}&first=10`,
+  { credentials: "include", headers: { Accept: "application/json" } }
+);
       const ct = r.headers.get("content-type") || "";
 
       if (r.status === 401 && ct.includes("application/json")) {
