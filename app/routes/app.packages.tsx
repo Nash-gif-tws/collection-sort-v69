@@ -172,7 +172,7 @@ export default function PackagesPage() {
         components: lines.map((l) => ({ variantId: l.variantId, qty: l.qty })),
       };
 
-      const res = await fetch("/api/bundles.create", {
+      const res = await fetch("/api/bundles/create", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
