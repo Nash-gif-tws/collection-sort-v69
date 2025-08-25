@@ -1,120 +1,173 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
+// app/routes/api.bundles.create.ts
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
-import { ensureAdminOrJsonReauth } from "~/server/reauth.server";
+import { authenticate } from "~/shopify.server";
 
-/**
- * POST /api/bundles.create
- * body: { title: string, components: [{ variantId: string, qty: number }] }
- */
-export async function action({ request }: ActionFunctionArgs) {
-  // If auth is missing, return 401 JSON with { reauthUrl } so the client can bounce to /auth.
-  const guard = await ensureAdminOrJsonReauth(request);
-  if ("reauthUrl" in guard) {
-    return json({ reauthUrl: guard.reauthUrl }, { status: 401 });
-  }
-  const { admin } = guard;
+type Component = { variantId: string; qty: number };
 
-  let body: any;
-  try {
-    body = await request.json();
-  } catch {
-    return json({ ok: false, error: "Bad JSON" }, { status: 400 });
-  }
-
-  const title = String(body?.title || "").trim();
-  const components = Array.isArray(body?.components) ? body.components : [];
-
-  if (!title) return json({ ok: false, error: "Title is required" }, { status: 400 });
-  if (!components.length) return json({ ok: false, error: "At least one component required" }, { status: 400 });
-
-  // normalize qty
-  for (const c of components) c.qty = Math.max(1, Number(c.qty || 1));
-
-  // 1) Pull component inventory for availability calculation
-  const ids = components.map((c: any) => c.variantId);
-  const invRes = await admin.graphql(
-    `#graphql
-    query($ids:[ID!]!) {
-      nodes(ids:$ids) {
-        ... on ProductVariant {
-          id
-          inventoryLevels(first: 50) {
-            edges { node { available } }
-          }
-        }
-      }
-    }`,
-    { variables: { ids } }
-  );
-  const invData = await invRes.json();
-  if (!invData?.data?.nodes) {
-    return json({ ok: false, error: "Failed to read inventory" }, { status: 500 });
-  }
-
-  const findVariant = (vid: string) => invData.data.nodes.find((n: any) => n?.id === vid);
-  const available = (v: any) =>
-    (v?.inventoryLevels?.edges || []).reduce((s: number, e: any) => s + (e?.node?.available ?? 0), 0);
-
-  // 2) Compute bundle capacity = floor(min(available_i / qty_i))
-  let bundleAvailable = Infinity;
-  for (const c of components) {
-    const v = findVariant(c.variantId);
-    const a = available(v);
-    const cap = Math.floor(a / c.qty);
-    bundleAvailable = Math.min(bundleAvailable, cap);
-  }
-  if (!Number.isFinite(bundleAvailable)) bundleAvailable = 0;
-
-  // 3) Create a bundle product (single variant for now)
-  const createRes = await admin.graphql(
-    `#graphql
-    mutation($input: ProductInput!) {
-      productCreate(input: $input) {
-        product {
-          id
-          handle
-          title
-          variants(first: 1) { edges { node { id } } }
-        }
-        userErrors { field message }
-      }
-    }`,
-    {
-      variables: {
-        input: {
-          title,
-          status: "ACTIVE",
-          variants: [{ title: "Default" }],
-        },
-      },
-    }
-  );
-  const create = await createRes.json();
-  const err = create?.data?.productCreate?.userErrors?.[0]?.message;
-  if (err) return json({ ok: false, error: err }, { status: 400 });
-
-  const productId = create.data.productCreate.product.id;
-
-  // 4) Save components into a product metafield so we can resync later
-  await admin.graphql(
-    `#graphql
-    mutation SetBundleMeta($ownerId: ID!, $value: String!) {
-      metafieldsSet(metafields: [{
-        ownerId: $ownerId,
-        namespace: "bundle",
-        key: "components",
-        type: "json",
-        value: $value
-      }]) {
-        userErrors { message field }
-      }
-    }`,
-    { variables: { ownerId: productId, value: JSON.stringify({ components }) } }
-  );
-
-  // (Optional) You can set an initial inventory on the bundle variant to bundleAvailable here,
-  // but Shopify's inventory mutations vary by API version. We'll handle live syncing below.
-  return json({ ok: true, productId, bundleAvailable });
+export async function loader(_args: LoaderFunctionArgs) {
+  // POST only
+  return json({ ok: false, error: "POST only" }, { status: 405 });
 }
 
-export const loader = () => json({ ok: false, error: "POST only" }, { status: 405 });
+export async function action({ request }: ActionFunctionArgs) {
+  // --- Parse & validate ---
+  let title = "";
+  let components: Component[] = [];
+  try {
+    const body = await request.json();
+    title = (body?.title || "").trim();
+    components = Array.isArray(body?.components) ? body.components : [];
+  } catch {
+    return json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  if (!title) {
+    return json({ ok: false, error: "Missing title" }, { status: 400 });
+  }
+  if (!components.length) {
+    return json({ ok: false, error: "Add at least one component" }, { status: 400 });
+  }
+  for (const c of components) {
+    if (!c?.variantId || !/gid:\/\//.test(c.variantId)) {
+      return json({ ok: false, error: `Bad variantId: ${c?.variantId}` }, { status: 400 });
+    }
+    if (!Number.isFinite(c?.qty) || c.qty <= 0) {
+      return json({ ok: false, error: `Bad qty for ${c.variantId}` }, { status: 400 });
+    }
+  }
+
+  // --- Auth (JSON reauth instead of HTML) ---
+  let admin: any;
+  try {
+    ({ admin } = await authenticate.admin(request));
+  } catch {
+    const url = new URL(request.url);
+    const shop = url.searchParams.get("shop") || "";
+    const host = url.searchParams.get("host") || "";
+    const qs = [shop && `shop=${encodeURIComponent(shop)}`, host && `host=${encodeURIComponent(host)}`]
+      .filter(Boolean)
+      .join("&");
+    return json({ ok: false, reauthUrl: `/auth${qs ? `?${qs}` : ""}` }, { status: 401 });
+  }
+
+  // --- Optional: compute capacity from inventory (best-effort) ---
+  let capacity: number | null = null;
+  try {
+    const ids = components.map((c) => c.variantId);
+    const invRes = await admin.graphql(
+      `#graphql
+      query BundleCapacity($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on ProductVariant {
+            id
+            inventoryItem {
+              inventoryLevels(first: 50) {
+                edges {
+                  node {
+                    available
+                  }
+                }
+              }
+            }
+          }
+        }
+      }`,
+      { variables: { ids } }
+    );
+    const inv = await invRes.json();
+
+    // If schema changes or no data, guard
+    if (inv?.errors) throw new Error(inv.errors?.[0]?.message || "Inventory query error.");
+
+    const availMap = new Map<string, number>();
+    for (const n of inv?.data?.nodes || []) {
+      if (!n?.id) continue;
+      const levels = n?.inventoryItem?.inventoryLevels?.edges || [];
+      const total = levels.reduce((sum: number, e: any) => sum + (Number(e?.node?.available ?? 0) || 0), 0);
+      availMap.set(n.id, total);
+    }
+
+    // capacity = min( floor(available / requiredQty) ) across components
+    capacity = components.reduce((acc, c) => {
+      const have = availMap.get(c.variantId) ?? 0;
+      const capForThis = Math.floor(have / (c.qty || 1));
+      return acc === null ? capForThis : Math.min(acc, capForThis);
+    }, null as number | null);
+    if (capacity === null) capacity = 0;
+  } catch (e) {
+    // Don’t fail bundle creation because capacity calc broke
+    console.error("Capacity calc failed:", e);
+    capacity = null;
+  }
+
+  // --- Create a DRAFT product to represent the bundle ---
+  try {
+    // Store components as JSON in a product metafield
+    const metafieldValue = JSON.stringify({
+      components,               // [{ variantId, qty }]
+      kind: "bundle",
+      version: 1,
+    });
+
+    const createRes = await admin.graphql(
+      `#graphql
+      mutation BundleCreate($input: ProductInput!) {
+        productCreate(input: $input) {
+          product {
+            id
+            handle
+            title
+            status
+          }
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          input: {
+            title,
+            status: "DRAFT",
+            productType: "Bundle",
+            // One default variant; merchant can adjust price/images later
+            variants: [{ title: "Default", requiresShipping: true }],
+            metafields: [
+              {
+                namespace: "custom",
+                key: "bundle_components",
+                type: "json",
+                value: metafieldValue,
+              },
+            ],
+          },
+        },
+      }
+    );
+
+    const created = await createRes.json();
+
+    if (created?.errors?.length) {
+      return json(
+        { ok: false, error: created.errors[0]?.message || "GraphQL error (productCreate)" },
+        { status: 200 }
+      );
+    }
+    const ue = created?.data?.productCreate?.userErrors;
+    if (ue?.length) {
+      return json(
+        { ok: false, error: ue[0]?.message || "User error (productCreate)", details: ue },
+        { status: 200 }
+      );
+    }
+
+    const productId = created?.data?.productCreate?.product?.id;
+    if (!productId) {
+      return json({ ok: false, error: "No productId returned" }, { status: 200 });
+    }
+
+    return json({ ok: true, productId, capacity });
+  } catch (e: any) {
+    console.error("Bundle create failed:", e);
+    return json({ ok: false, error: e?.message || String(e) }, { status: 200 });
+  }
+}
