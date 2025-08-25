@@ -1,125 +1,76 @@
 // app/routes/api.bundles.create.ts
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
+import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "~/shopify.server";
 
 type Component = { variantId: string; qty: number };
 
-export async function loader(_args: LoaderFunctionArgs) {
-  // POST only
-  return json({ ok: false, error: "POST only" }, { status: 405 });
-}
-
 export async function action({ request }: ActionFunctionArgs) {
-  // --- Parse & validate ---
-  let title = "";
-  let components: Component[] = [];
   try {
-    const body = await request.json();
-    title = (body?.title || "").trim();
-    components = Array.isArray(body?.components) ? body.components : [];
-  } catch {
-    return json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  if (!title) {
-    return json({ ok: false, error: "Missing title" }, { status: 400 });
-  }
-  if (!components.length) {
-    return json({ ok: false, error: "Add at least one component" }, { status: 400 });
-  }
-  for (const c of components) {
-    if (!c?.variantId || !/gid:\/\//.test(c.variantId)) {
-      return json({ ok: false, error: `Bad variantId: ${c?.variantId}` }, { status: 400 });
+    const { admin } = await authenticate.admin(request);
+    if (request.method !== "POST") {
+      return json({ ok: false, error: "Method not allowed" }, { status: 405 });
     }
-    if (!Number.isFinite(c?.qty) || c.qty <= 0) {
-      return json({ ok: false, error: `Bad qty for ${c.variantId}` }, { status: 400 });
-    }
-  }
 
-  // --- Auth (JSON reauth instead of HTML) ---
-  let admin: any;
-  try {
-    ({ admin } = await authenticate.admin(request));
-  } catch {
-    const url = new URL(request.url);
-    const shop = url.searchParams.get("shop") || "";
-    const host = url.searchParams.get("host") || "";
-    const qs = [shop && `shop=${encodeURIComponent(shop)}`, host && `host=${encodeURIComponent(host)}`]
-      .filter(Boolean)
-      .join("&");
-    return json({ ok: false, reauthUrl: `/auth${qs ? `?${qs}` : ""}` }, { status: 401 });
-  }
+    const body = await request.json().catch(() => ({}));
+    const title: string = (body?.title || "").trim();
+    const components: Component[] = Array.isArray(body?.components) ? body.components : [];
 
-  // --- Optional: compute capacity from inventory (best-effort) ---
-  let capacity: number | null = null;
-  try {
-    const ids = components.map((c) => c.variantId);
+    if (!title) return json({ ok: false, error: "Title is required" }, { status: 400 });
+    if (!components.length)
+      return json({ ok: false, error: "At least one component is required" }, { status: 400 });
+
+    // --- 1) Compute inventory-based capacity across all locations ---
+    const variantIds = components.map((c) => c.variantId);
     const invRes = await admin.graphql(
       `#graphql
-      query BundleCapacity($ids: [ID!]!) {
-        nodes(ids: $ids) {
+      query Inv($ids:[ID!]!) {
+        nodes(ids:$ids) {
           ... on ProductVariant {
             id
             inventoryItem {
               inventoryLevels(first: 50) {
-                edges {
-                  node {
-                    available
-                  }
-                }
+                edges { node { available } }
               }
             }
           }
         }
       }`,
-      { variables: { ids } }
+      { variables: { ids: variantIds } }
     );
-    const inv = await invRes.json();
-
-    // If schema changes or no data, guard
-    if (inv?.errors) throw new Error(inv.errors?.[0]?.message || "Inventory query error.");
-
-    const availMap = new Map<string, number>();
-    for (const n of inv?.data?.nodes || []) {
+    const invJson = await invRes.json();
+    const availByVariant = new Map<string, number>();
+    for (const n of invJson?.data?.nodes ?? []) {
       if (!n?.id) continue;
-      const levels = n?.inventoryItem?.inventoryLevels?.edges || [];
-      const total = levels.reduce((sum: number, e: any) => sum + (Number(e?.node?.available ?? 0) || 0), 0);
-      availMap.set(n.id, total);
+      const total =
+        n?.inventoryItem?.inventoryLevels?.edges?.reduce(
+          (sum: number, e: any) => sum + (Number(e?.node?.available ?? 0) || 0),
+          0
+        ) ?? 0;
+      availByVariant.set(n.id, total);
     }
-
-    // capacity = min( floor(available / requiredQty) ) across components
-    capacity = components.reduce((acc, c) => {
-      const have = availMap.get(c.variantId) ?? 0;
-      const capForThis = Math.floor(have / (c.qty || 1));
-      return acc === null ? capForThis : Math.min(acc, capForThis);
-    }, null as number | null);
+    // capacity = min(floor(available / qty)) across components
+    let capacity: number | null = null;
+    for (const c of components) {
+      const have = Number(availByVariant.get(c.variantId) ?? 0);
+      const need = Math.max(1, Number(c.qty) || 1);
+      const capThis = Math.floor(have / need);
+      capacity = capacity === null ? capThis : Math.min(capacity, capThis);
+    }
     if (capacity === null) capacity = 0;
-  } catch (e) {
-    // Don’t fail bundle creation because capacity calc broke
-    console.error("Capacity calc failed:", e);
-    capacity = null;
-  }
 
-  // --- Create a DRAFT product to represent the bundle ---
-  try {
-    // Store components as JSON in a product metafield
-    const metafieldValue = JSON.stringify({
-      components,               // [{ variantId, qty }]
-      kind: "bundle",
-      version: 1,
-    });
+    // Optional: compute a default price (sum of parts once) for the shell variant
+    // If you’d rather show computed total on the PDP, set this to 0.
+    // We’ll fetch price via Storefront on the theme side anyway.
+    // Here, we’ll set price to 0 to avoid any mismatch:
+    const shellPrice = "0.00";
 
-    const createRes = await admin.graphql(
+    // --- 2) Create product (without variants) ---
+    const createProductRes = await admin.graphql(
       `#graphql
-      mutation BundleCreate($input: ProductInput!) {
+      mutation CreateProduct($input: ProductInput!) {
         productCreate(input: $input) {
-          product {
-            id
-            handle
-            title
-            status
-          }
+          product { id handle status }
           userErrors { field message }
         }
       }`,
@@ -127,47 +78,100 @@ export async function action({ request }: ActionFunctionArgs) {
         variables: {
           input: {
             title,
-            status: "DRAFT",
             productType: "Bundle",
-            // One default variant; merchant can adjust price/images later
-            variants: [{ title: "Default", requiresShipping: true }],
-            metafields: [
-              {
-                namespace: "custom",
-                key: "bundle_components",
-                type: "json",
-                value: metafieldValue,
-              },
-            ],
+            status: "DRAFT", // or "ACTIVE" if you want it immediately live
           },
         },
       }
     );
-
-    const created = await createRes.json();
-
-    if (created?.errors?.length) {
-      return json(
-        { ok: false, error: created.errors[0]?.message || "GraphQL error (productCreate)" },
-        { status: 200 }
-      );
+    const createProductJson = await createProductRes.json();
+    const pErr = createProductJson?.data?.productCreate?.userErrors ?? [];
+    if (pErr.length) {
+      return json({ ok: false, error: pErr.map((e: any) => e.message).join(", ") }, { status: 400 });
     }
-    const ue = created?.data?.productCreate?.userErrors;
-    if (ue?.length) {
-      return json(
-        { ok: false, error: ue[0]?.message || "User error (productCreate)", details: ue },
-        { status: 200 }
-      );
+    const productId: string = createProductJson?.data?.productCreate?.product?.id;
+    if (!productId) return json({ ok: false, error: "No productId from productCreate" }, { status: 500 });
+
+    // --- 3) Create a single shell variant for the product ---
+    const createVarRes = await admin.graphql(
+      `#graphql
+      mutation CreateVariant($input: ProductVariantInput!) {
+        productVariantCreate(input: $input) {
+          productVariant { id }
+          userErrors { field message }
+        }
+      }`,
+      {
+        variables: {
+          input: {
+            productId,
+            title: "Default",
+            price: shellPrice, // decimal string
+            // inventoryManagement: NOT_MANAGED is default now; we will explode lines in cart
+          },
+        },
+      }
+    );
+    const createVarJson = await createVarRes.json();
+    const vErr = createVarJson?.data?.productVariantCreate?.userErrors ?? [];
+    if (vErr.length) {
+      return json({ ok: false, error: vErr.map((e: any) => e.message).join(", ") }, { status: 400 });
+    }
+    const variantId: string = createVarJson?.data?.productVariantCreate?.productVariant?.id;
+
+    // --- 4) Save metafields on the product ---
+    const metafieldValue = JSON.stringify({
+      kind: "bundle",
+      version: 1,
+      components: components.map((c) => ({
+        variantId: c.variantId,
+        qty: Math.max(1, Number(c.qty) || 1),
+      })),
+    });
+
+    const mfInputs: any[] = [
+      {
+        ownerId: productId,
+        namespace: "custom",
+        key: "bundle_components",
+        type: "json",
+        value: metafieldValue,
+      },
+    ];
+    if (capacity !== null) {
+      mfInputs.push({
+        ownerId: productId,
+        namespace: "custom",
+        key: "bundle_capacity",
+        type: "number_integer",
+        value: String(capacity),
+      });
     }
 
-    const productId = created?.data?.productCreate?.product?.id;
-    if (!productId) {
-      return json({ ok: false, error: "No productId returned" }, { status: 200 });
+    const mfRes = await admin.graphql(
+      `#graphql
+      mutation SaveMF($metafields:[MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields { id key namespace }
+          userErrors { field message }
+        }
+      }`,
+      { variables: { metafields: mfInputs } }
+    );
+    const mfJson = await mfRes.json();
+    const mfErr = mfJson?.data?.metafieldsSet?.userErrors ?? [];
+    if (mfErr.length) {
+      return json({ ok: false, error: mfErr.map((e: any) => e.message).join(", ") }, { status: 400 });
     }
 
-    return json({ ok: true, productId, capacity });
+    return json({
+      ok: true,
+      productId,
+      variantId,
+      capacity,
+    });
   } catch (e: any) {
-    console.error("Bundle create failed:", e);
-    return json({ ok: false, error: e?.message || String(e) }, { status: 200 });
+    return json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }
 }
+
