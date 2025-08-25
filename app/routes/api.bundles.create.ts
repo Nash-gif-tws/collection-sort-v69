@@ -21,43 +21,60 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ ok: false, error: "At least one component is required" }, { status: 400 });
 
     // --- 1) Compute inventory-based capacity across all locations ---
-    const variantIds = components.map((c) => c.variantId);
-    const invRes = await admin.graphql(
-      `#graphql
-      query Inv($ids:[ID!]!) {
-        nodes(ids:$ids) {
-          ... on ProductVariant {
-            id
-            inventoryItem {
-              inventoryLevels(first: 50) {
-                edges { node { available } }
+const variantIds = components.map((c) => c.variantId);
+
+const invRes = await admin.graphql(
+  `#graphql
+  query Inv($ids:[ID!]!) {
+    nodes(ids:$ids) {
+      ... on ProductVariant {
+        id
+        inventoryItem {
+          inventoryLevels(first: 50) {
+            edges {
+              node {
+                # New shape: use quantities(names: [AVAILABLE])
+                quantities(names: [AVAILABLE]) {
+                  name
+                  quantity
+                }
               }
             }
           }
         }
-      }`,
-      { variables: { ids: variantIds } }
-    );
-    const invJson = await invRes.json();
-    const availByVariant = new Map<string, number>();
-    for (const n of invJson?.data?.nodes ?? []) {
-      if (!n?.id) continue;
-      const total =
-        n?.inventoryItem?.inventoryLevels?.edges?.reduce(
-          (sum: number, e: any) => sum + (Number(e?.node?.available ?? 0) || 0),
-          0
-        ) ?? 0;
-      availByVariant.set(n.id, total);
+      }
     }
-    // capacity = min(floor(available / qty)) across components
-    let capacity: number | null = null;
-    for (const c of components) {
-      const have = Number(availByVariant.get(c.variantId) ?? 0);
-      const need = Math.max(1, Number(c.qty) || 1);
-      const capThis = Math.floor(have / need);
-      capacity = capacity === null ? capThis : Math.min(capacity, capThis);
-    }
-    if (capacity === null) capacity = 0;
+  }`,
+  { variables: { ids: variantIds } }
+);
+
+const invJson = await invRes.json();
+
+// Sum AVAILABLE across all locations for each variant
+const availByVariant = new Map<string, number>();
+for (const n of invJson?.data?.nodes ?? []) {
+  if (!n?.id) continue;
+  const total =
+    n?.inventoryItem?.inventoryLevels?.edges?.reduce(
+      (sum: number, e: any) => {
+        const qList = e?.node?.quantities ?? [];
+        const avail = qList.find((q: any) => q?.name === "AVAILABLE")?.quantity ?? 0;
+        return sum + Number(avail || 0);
+      },
+      0
+    ) ?? 0;
+  availByVariant.set(n.id, total);
+}
+
+// capacity = min(floor(available / qty)) across components
+let capacity: number | null = null;
+for (const c of components) {
+  const have = Number(availByVariant.get(c.variantId) ?? 0);
+  const need = Math.max(1, Number(c.qty) || 1);
+  const capThis = Math.floor(have / need);
+  capacity = capacity === null ? capThis : Math.min(capacity, capThis);
+}
+if (capacity === null) capacity = 0;
 
     // Optional: compute a default price (sum of parts once) for the shell variant
     // If you’d rather show computed total on the PDP, set this to 0.
