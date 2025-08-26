@@ -23,47 +23,91 @@ export async function action({ request }: ActionFunctionArgs) {
     // --- 1) Compute inventory-based capacity across all locations ---
 const variantIds = components.map((c) => c.variantId);
 
-const invRes = await admin.graphql(
-  `#graphql
-  query Inv($ids:[ID!]!) {
-    nodes(ids:$ids) {
-      ... on ProductVariant {
-        id
-        inventoryItem {
-          inventoryLevels(first: 50) {
-            edges {
-              node {
-                # New shape: use quantities(names: [AVAILABLE])
-                quantities(names: [AVAILABLE]) {
-                  name
-                  quantity
+async function fetchInventoryWithNames(names: string[]) {
+  const res = await admin.graphql(
+    `#graphql
+    query Inv($ids:[ID!]!, $names:[String!]!) {
+      nodes(ids:$ids) {
+        ... on ProductVariant {
+          id
+          inventoryItem {
+            inventoryLevels(first: 50) {
+              edges {
+                node {
+                  quantities(names: $names) {
+                    name
+                    quantity
+                  }
                 }
               }
             }
           }
         }
       }
-    }
-  }`,
-  { variables: { ids: variantIds } }
-);
+    }`,
+    { variables: { ids: variantIds, names } }
+  );
+  return res.json();
+}
 
-const invJson = await invRes.json();
+let invJson: any;
+let availByVariant = new Map<string, number>();
 
-// Sum AVAILABLE across all locations for each variant
-const availByVariant = new Map<string, number>();
-for (const n of invJson?.data?.nodes ?? []) {
-  if (!n?.id) continue;
-  const total =
-    n?.inventoryItem?.inventoryLevels?.edges?.reduce(
-      (sum: number, e: any) => {
-        const qList = e?.node?.quantities ?? [];
-        const avail = qList.find((q: any) => q?.name === "AVAILABLE")?.quantity ?? 0;
-        return sum + Number(avail || 0);
-      },
-      0
-    ) ?? 0;
-  availByVariant.set(n.id, total);
+// Try UPPERCASE first
+invJson = await fetchInventoryWithNames(["AVAILABLE"]);
+
+// If Shopify complains about the 'names' arg or similar, try lowercase
+if (Array.isArray(invJson?.errors) && invJson.errors.length) {
+  const needsLower = invJson.errors.some((e: any) =>
+    String(e?.message || "").includes("Argument 'names'")
+  );
+  if (needsLower) {
+    invJson = await fetchInventoryWithNames(["available"]);
+  }
+}
+
+// If we still have an error (i.e., quantities not supported), fall back.
+let usedFallbackVariantQuantity = false;
+if (Array.isArray(invJson?.errors) && invJson.errors.length) {
+  // Fallback: use deprecated ProductVariant.inventoryQuantity (total across locations)
+  const res2 = await admin.graphql(
+    `#graphql
+    query InvFallback($ids:[ID!]!) {
+      nodes(ids:$ids) {
+        ... on ProductVariant {
+          id
+          inventoryQuantity
+        }
+      }
+    }`,
+    { variables: { ids: variantIds } }
+  );
+  const json2 = await res2.json();
+  usedFallbackVariantQuantity = true;
+  for (const n of json2?.data?.nodes ?? []) {
+    if (!n?.id) continue;
+    const qty = Number(n?.inventoryQuantity ?? 0);
+    availByVariant.set(n.id, qty);
+  }
+} else {
+  // Sum AVAILABLE across locations from quantities API
+  for (const n of invJson?.data?.nodes ?? []) {
+    if (!n?.id) continue;
+    const total =
+      n?.inventoryItem?.inventoryLevels?.edges?.reduce(
+        (sum: number, e: any) => {
+          const list = e?.node?.quantities ?? [];
+          // prefer AVAILABLE (upper) otherwise available (lower)
+          const q =
+            list.find((q: any) => q?.name === "AVAILABLE")?.quantity ??
+            list.find((q: any) => q?.name === "available")?.quantity ??
+            0;
+          return sum + Number(q || 0);
+        },
+        0
+      ) ?? 0;
+    availByVariant.set(n.id, total);
+  }
 }
 
 // capacity = min(floor(available / qty)) across components
@@ -75,7 +119,6 @@ for (const c of components) {
   capacity = capacity === null ? capThis : Math.min(capacity, capThis);
 }
 if (capacity === null) capacity = 0;
-
     // Optional: compute a default price (sum of parts once) for the shell variant
     // If you’d rather show computed total on the PDP, set this to 0.
     // We’ll fetch price via Storefront on the theme side anyway.
