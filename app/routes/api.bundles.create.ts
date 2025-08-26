@@ -26,7 +26,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!title) return json({ ok: false, error: "Title is required" }, { status: 400 });
     if (!components.length) return json({ ok: false, error: "At least one component is required" }, { status: 400 });
 
-    // 1) Capacity from inventory (try quantities(names:["available"]) then fallback)
+    // --- 1) Compute capacity from inventory ---
     const variantIds = components.map((c) => c.variantId);
 
     const invRes = await admin.graphql(
@@ -47,13 +47,14 @@ export async function action({ request }: ActionFunctionArgs) {
           }
         }
       }`,
-      { variables: { ids: variantIds, names: ["available"] } }
+      { variables: { ids: variantIds, names: ["available"] } } // lowercase names per schema
     );
     let invJson = await asJson(invRes);
 
     const availByVariant = new Map<string, number>();
 
     if (hasGraphQLErr(invJson)) {
+      // Fallback: shops without quantities() – use inventoryQuantity
       const fbRes = await admin.graphql(
         `#graphql
         query InvFallback($ids:[ID!]!) {
@@ -66,9 +67,9 @@ export async function action({ request }: ActionFunctionArgs) {
       const fbJson = await asJson(fbRes);
       if (hasGraphQLErr(fbJson)) {
         const errMsg =
-          fbJson.errors?.map((e: any) => e?.message).join("; ")
-          || invJson.errors?.map((e: any) => e?.message).join("; ")
-          || "Unknown inventory error";
+          fbJson.errors?.map((e: any) => e?.message).join("; ") ||
+          invJson.errors?.map((e: any) => e?.message).join("; ") ||
+          "Unknown inventory error";
         return json({ ok: false, error: errMsg }, { status: 500 });
       }
       for (const n of fbJson?.data?.nodes ?? []) {
@@ -97,7 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     if (capacity === Number.POSITIVE_INFINITY) capacity = 0;
 
-    // 2) Create the bundle product — IMPORTANT: set a single option name so variants can be created
+    // --- 2) Create product WITHOUT `options` field (API version may not support it)
     const createProdRes = await admin.graphql(
       `#graphql
       mutation CreateProduct($input: ProductInput!) {
@@ -111,8 +112,7 @@ export async function action({ request }: ActionFunctionArgs) {
           input: {
             title,
             productType: "Bundle",
-            status: "DRAFT",           // change to ACTIVE if desired
-            options: ["Title"],        // <-- option NAME; Shopify default single option name
+            status: "DRAFT", // change to ACTIVE if you want it live immediately
           },
         },
       }
@@ -125,8 +125,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const productId: string | undefined = createProdJson?.data?.productCreate?.product?.id;
     if (!productId) return json({ ok: false, error: "No productId from productCreate" }, { status: 500 });
 
-    // 3) Create a single shell variant via bulk create — supply option VALUES only
-    //    Do NOT send `title` or `price` here (they cause schema errors on newer API versions).
+    // --- 3) Create a single shell variant via BULK (no title/price — supply option VALUES only)
+    // Shopify will auto-provision the single option name "Title" if none exists.
     const bulkCreateRes = await admin.graphql(
       `#graphql
       mutation BulkVarCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
@@ -141,8 +141,8 @@ export async function action({ request }: ActionFunctionArgs) {
           productId,
           variants: [
             {
-              options: ["Default Title"], // <-- matches the option NAME "Title"
-              // leave pricing out (theme/cart transform will price the bundle)
+              options: ["Default Title"], // value only; Shopify assumes option name "Title"
+              // do NOT include title/price here on newer APIs
             },
           ],
         },
@@ -157,7 +157,7 @@ export async function action({ request }: ActionFunctionArgs) {
       bulkCreateJson?.data?.productVariantsBulkCreate?.productVariants?.[0]?.id;
     if (!variantId) return json({ ok: false, error: "No variantId from productVariantsBulkCreate" }, { status: 500 });
 
-    // 4) Save bundle metafields (consumed by storefront theme / cart transform)
+    // --- 4) Save metafields
     const metafieldValue = JSON.stringify({
       kind: "bundle",
       version: 1,
