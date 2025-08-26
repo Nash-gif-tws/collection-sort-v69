@@ -1,11 +1,9 @@
-// app/routes/api.bundles.create.ts
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "~/shopify.server";
 
 type Component = { variantId: string; qty: number };
 
-// Small helpers
 function hasGraphQLErr(o: any) {
   return Array.isArray(o?.errors) && o.errors.length > 0;
 }
@@ -28,10 +26,9 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!title) return json({ ok: false, error: "Title is required" }, { status: 400 });
     if (!components.length) return json({ ok: false, error: "At least one component is required" }, { status: 400 });
 
-    // 1) Compute capacity from inventory
+    // 1) Capacity from inventory (try quantities(names:["available"]) then fallback)
     const variantIds = components.map((c) => c.variantId);
 
-    // Try modern quantities() API
     const invRes = await admin.graphql(
       `#graphql
       query Inv($ids:[ID!]!, $names:[String!]!) {
@@ -57,7 +54,6 @@ export async function action({ request }: ActionFunctionArgs) {
     const availByVariant = new Map<string, number>();
 
     if (hasGraphQLErr(invJson)) {
-      // Fallback for shops/API versions without quantities()
       const fbRes = await admin.graphql(
         `#graphql
         query InvFallback($ids:[ID!]!) {
@@ -70,9 +66,9 @@ export async function action({ request }: ActionFunctionArgs) {
       const fbJson = await asJson(fbRes);
       if (hasGraphQLErr(fbJson)) {
         const errMsg =
-          fbJson.errors?.map((e: any) => e?.message).join("; ") ||
-          invJson.errors?.map((e: any) => e?.message).join("; ") ||
-          "Unknown inventory error";
+          fbJson.errors?.map((e: any) => e?.message).join("; ")
+          || invJson.errors?.map((e: any) => e?.message).join("; ")
+          || "Unknown inventory error";
         return json({ ok: false, error: errMsg }, { status: 500 });
       }
       for (const n of fbJson?.data?.nodes ?? []) {
@@ -101,7 +97,7 @@ export async function action({ request }: ActionFunctionArgs) {
     }
     if (capacity === Number.POSITIVE_INFINITY) capacity = 0;
 
-    // 2) Create the product (no variants here)
+    // 2) Create the bundle product — IMPORTANT: set a single option name so variants can be created
     const createProdRes = await admin.graphql(
       `#graphql
       mutation CreateProduct($input: ProductInput!) {
@@ -115,7 +111,8 @@ export async function action({ request }: ActionFunctionArgs) {
           input: {
             title,
             productType: "Bundle",
-            status: "DRAFT", // change to ACTIVE if you want it live immediately
+            status: "DRAFT",           // change to ACTIVE if desired
+            options: ["Title"],        // <-- option NAME; Shopify default single option name
           },
         },
       }
@@ -128,10 +125,8 @@ export async function action({ request }: ActionFunctionArgs) {
     const productId: string | undefined = createProdJson?.data?.productCreate?.product?.id;
     if (!productId) return json({ ok: false, error: "No productId from productCreate" }, { status: 500 });
 
-    // 3) Create a single shell variant with productVariantsBulkCreate (replacement for productVariantCreate)
-    // Keep price at 0.00 if you plan to price bundles dynamically in theme/cart transform.
-    const shellPrice = "0.00";
-
+    // 3) Create a single shell variant via bulk create — supply option VALUES only
+    //    Do NOT send `title` or `price` here (they cause schema errors on newer API versions).
     const bulkCreateRes = await admin.graphql(
       `#graphql
       mutation BulkVarCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
@@ -146,10 +141,8 @@ export async function action({ request }: ActionFunctionArgs) {
           productId,
           variants: [
             {
-              title: "Default",
-              price: shellPrice,
-              // If your API version supports it and you want to hide parent on sales channels, try:
-              // requiresComponents: true,
+              options: ["Default Title"], // <-- matches the option NAME "Title"
+              // leave pricing out (theme/cart transform will price the bundle)
             },
           ],
         },
@@ -164,7 +157,7 @@ export async function action({ request }: ActionFunctionArgs) {
       bulkCreateJson?.data?.productVariantsBulkCreate?.productVariants?.[0]?.id;
     if (!variantId) return json({ ok: false, error: "No variantId from productVariantsBulkCreate" }, { status: 500 });
 
-    // 4) Persist bundle definition via metafields (theme/cart transform can read this)
+    // 4) Save bundle metafields (consumed by storefront theme / cart transform)
     const metafieldValue = JSON.stringify({
       kind: "bundle",
       version: 1,
@@ -174,23 +167,6 @@ export async function action({ request }: ActionFunctionArgs) {
       })),
     });
 
-    const mfInputs: any[] = [
-      {
-        ownerId: productId,
-        namespace: "custom",
-        key: "bundle_components",
-        type: "json",
-        value: metafieldValue,
-      },
-      {
-        ownerId: productId,
-        namespace: "custom",
-        key: "bundle_capacity",
-        type: "number_integer",
-        value: String(Math.max(0, capacity)),
-      },
-    ];
-
     const mfRes = await admin.graphql(
       `#graphql
       mutation SaveMF($metafields:[MetafieldsSetInput!]!) {
@@ -199,7 +175,26 @@ export async function action({ request }: ActionFunctionArgs) {
           userErrors { field message }
         }
       }`,
-      { variables: { metafields: mfInputs } }
+      {
+        variables: {
+          metafields: [
+            {
+              ownerId: productId,
+              namespace: "custom",
+              key: "bundle_components",
+              type: "json",
+              value: metafieldValue,
+            },
+            {
+              ownerId: productId,
+              namespace: "custom",
+              key: "bundle_capacity",
+              type: "number_integer",
+              value: String(Math.max(0, capacity)),
+            },
+          ],
+        },
+      }
     );
     const mfJson = await asJson(mfRes);
     const mfUE = mfJson?.data?.metafieldsSet?.userErrors ?? [];
