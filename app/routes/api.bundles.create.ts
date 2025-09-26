@@ -3,11 +3,10 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "~/shopify.server";
 
-/** ------------ Types for request body ------------ **/
 type VariantOptionValue = { optionName?: string; optionId?: string; name: string };
 type CreateVariantInput = {
   optionValues?: VariantOptionValue[];
-  price?: string; // must be string
+  price?: string;
   inventoryItem?: { sku?: string; tracked?: boolean; requiresShipping?: boolean };
   inventoryQuantities?: Array<{ locationId: string; availableQuantity: number }>;
   requiresComponents?: boolean;
@@ -27,7 +26,6 @@ type Body = {
   autoPublish?: boolean;
 };
 
-/** ------------ Remix action ------------ **/
 export async function action({ request }: ActionFunctionArgs) {
   try {
     if (request.method !== "POST") {
@@ -36,7 +34,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { admin } = await authenticate.admin(request);
 
-    /** ---------- Robust body parsing: JSON or FormData ---------- */
+    /** ---------- Robust body parsing ---------- */
     let body: any = {};
     const contentType = request.headers.get("content-type") || "";
 
@@ -50,6 +48,7 @@ export async function action({ request }: ActionFunctionArgs) {
       for (const [k, v] of fd.entries()) {
         body[k] = v;
       }
+      // Parse stringified JSON fields
       const tryParse = (val: any) => {
         if (typeof val !== "string") return val;
         const s = val.trim();
@@ -60,9 +59,34 @@ export async function action({ request }: ActionFunctionArgs) {
       body.createVariants   = tryParse(body.createVariants);
       body.variants         = tryParse(body.variants);
       body.bundleComponents = tryParse(body.bundleComponents);
-      body.autoPublish      = typeof body.autoPublish === "string" ? /^(true|1|yes)$/i.test(body.autoPublish) : !!body.autoPublish;
-      body.parentIndex      = body.parentIndex != null ? Number(body.parentIndex) : body.parentIndex;
-      body.qty              = body.qty != null ? Number(body.qty) : body.qty;
+
+      // Convert bracketed keys into arrays (e.g. createVariants[0][price])
+      const assemble = (prefix: string) => {
+        const re = new RegExp(`^${prefix}\\[(\\d+)\\]\\[(.+)\\]$`);
+        const acc: Record<number, any> = {};
+        for (const key of Object.keys(body)) {
+          const m = key.match(re);
+          if (!m) continue;
+          const idx = Number(m[1]);
+          const prop = m[2];
+          acc[idx] ||= {};
+          acc[idx][prop] = body[key];
+          delete body[key];
+        }
+        if (Object.keys(acc).length > 0) {
+          body[prefix] = Object.keys(acc)
+            .sort((a, b) => Number(a) - Number(b))
+            .map((i) => acc[Number(i)]);
+        }
+      };
+      assemble("createVariants");
+      assemble("bundleComponents");
+
+      body.autoPublish = typeof body.autoPublish === "string"
+        ? /^(true|1|yes)$/i.test(body.autoPublish)
+        : !!body.autoPublish;
+      body.parentIndex = body.parentIndex != null ? Number(body.parentIndex) : body.parentIndex;
+      body.qty = body.qty != null ? Number(body.qty) : body.qty;
     } else {
       body = await request.json().catch(() => ({}));
     }
@@ -74,7 +98,7 @@ export async function action({ request }: ActionFunctionArgs) {
       return json({ ok: false, error: "Missing title" }, { status: 400 });
     }
 
-    /** 1) Normalize incoming variants */
+    /** 1) Normalize variants */
     let createVariants: CreateVariantInput[] =
       Array.isArray(b.createVariants) ? b.createVariants :
       Array.isArray(b.variants)       ? b.variants       : [];
@@ -100,7 +124,7 @@ export async function action({ request }: ActionFunctionArgs) {
     if (!Array.isArray(createVariants) || createVariants.length === 0) {
       return json({
         ok: false,
-        error: "createVariants must be a non-empty array (or provide price/sku/qty/locationId to auto-build one)"
+        error: "createVariants must be a non-empty array (or provide price/sku/qty/locationId to auto-build one)",
       }, { status: 400 });
     }
 
@@ -113,19 +137,12 @@ export async function action({ request }: ActionFunctionArgs) {
           userErrors { field message }
         }
       }`,
-      {
-        variables: {
-          product: b.productOptions
-            ? { title: b.title, productOptions: b.productOptions }
-            : { title: b.title },
-        },
-      }
+      { variables: { product: b.productOptions ? { title: b.title, productOptions: b.productOptions } : { title: b.title } } }
     );
     const createData = await createRes.json();
     const pErr = createData?.data?.productCreate?.userErrors ?? [];
-    if (pErr.length) {
-      return json({ ok: false, step: "productCreate", errors: pErr }, { status: 400 });
-    }
+    if (pErr.length) return json({ ok: false, step: "productCreate", errors: pErr }, { status: 400 });
+
     const productId: string | undefined = createData?.data?.productCreate?.product?.id;
     if (!productId) return json({ ok: false, error: "Product not created" }, { status: 500 });
 
@@ -142,14 +159,11 @@ export async function action({ request }: ActionFunctionArgs) {
     );
     const bulkData = await bulkRes.json();
     const vErr = bulkData?.data?.productVariantsBulkCreate?.userErrors ?? [];
-    if (vErr.length) {
-      return json({ ok: false, step: "productVariantsBulkCreate", errors: vErr }, { status: 400 });
-    }
+    if (vErr.length) return json({ ok: false, step: "productVariantsBulkCreate", errors: vErr }, { status: 400 });
+
     const createdVariants: Array<{ id: string; title: string }> =
       bulkData?.data?.productVariantsBulkCreate?.productVariants ?? [];
-    if (!createdVariants.length) {
-      return json({ ok: false, error: "No variants created" }, { status: 500 });
-    }
+    if (!createdVariants.length) return json({ ok: false, error: "No variants created" }, { status: 500 });
 
     /** 4) Wire bundle components */
     let bundleRelResult: any = null;
@@ -161,7 +175,6 @@ export async function action({ request }: ActionFunctionArgs) {
         id: c.variantId,
         quantity: Number(c.qty),
       }));
-
       const relRes = await admin.graphql(
         `#graphql
         mutation CreateBundleComponents($input: [ProductVariantRelationshipUpdateInput!]!) {
@@ -175,24 +188,12 @@ export async function action({ request }: ActionFunctionArgs) {
             userErrors { code field message }
           }
         }`,
-        {
-          variables: {
-            input: [
-              {
-                parentProductVariantId: parentVariantId,
-                productVariantRelationshipsToCreate: componentsInput,
-              },
-            ],
-          },
-        }
+        { variables: { input: [{ parentProductVariantId: parentVariantId, productVariantRelationshipsToCreate: componentsInput }] } }
       );
       const relData = await relRes.json();
       const relErr = relData?.data?.productVariantRelationshipBulkUpdate?.userErrors ?? [];
-      if (relErr.length) {
-        return json({ ok: false, step: "bundleComponents", errors: relErr }, { status: 400 });
-      }
-      bundleRelResult =
-        relData?.data?.productVariantRelationshipBulkUpdate?.parentProductVariants ?? null;
+      if (relErr.length) return json({ ok: false, step: "bundleComponents", errors: relErr }, { status: 400 });
+      bundleRelResult = relData?.data?.productVariantRelationshipBulkUpdate?.parentProductVariants ?? null;
     }
 
     /** 5) Optional: publish to Online Store */
@@ -205,10 +206,8 @@ export async function action({ request }: ActionFunctionArgs) {
         }`
       );
       const pubsData = await pubsRes.json();
-      const pubs: Array<{ id: string; name: string }> =
-        pubsData?.data?.publications?.edges?.map((e: any) => e.node) ?? [];
+      const pubs: Array<{ id: string; name: string }> = pubsData?.data?.publications?.edges?.map((e: any) => e.node) ?? [];
       const onlineStore = pubs.find((p) => /online store/i.test(p.name)) || pubs[0];
-
       if (onlineStore) {
         const pubRes = await admin.graphql(
           `#graphql
@@ -222,25 +221,20 @@ export async function action({ request }: ActionFunctionArgs) {
         );
         const pubData = await pubRes.json();
         const pubErr = pubData?.data?.publishablePublish?.userErrors ?? [];
-        if (pubErr.length) {
-          return json({ ok: false, step: "publishablePublish", errors: pubErr }, { status: 400 });
-        }
+        if (pubErr.length) return json({ ok: false, step: "publishablePublish", errors: pubErr }, { status: 400 });
         publishResult = pubData?.data?.publishablePublish?.publishable ?? null;
       }
     }
 
     /** 6) Done */
-    return json(
-      {
-        ok: true,
-        productId,
-        variantsCreated: createdVariants,
-        bundleParentVariantId: parentVariantId ?? null,
-        bundleWiring: bundleRelResult,
-        published: publishResult,
-      },
-      { status: 200 }
-    );
+    return json({
+      ok: true,
+      productId,
+      variantsCreated: createdVariants,
+      bundleParentVariantId: parentVariantId ?? null,
+      bundleWiring: bundleRelResult,
+      published: publishResult,
+    });
   } catch (err: any) {
     return json({ ok: false, error: err?.message || String(err) }, { status: 500 });
   }
