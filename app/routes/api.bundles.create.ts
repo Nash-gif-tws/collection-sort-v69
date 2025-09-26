@@ -3,7 +3,7 @@ import type { ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { authenticate } from "~/shopify.server";
 
-/** ---- Types for request body ---- **/
+/** ------------ Types for request body ------------ **/
 type VariantOptionValue = { optionName?: string; optionId?: string; name: string };
 type CreateVariantInput = {
   // Only include if your product actually has options:
@@ -53,7 +53,7 @@ type Body = {
   autoPublish?: boolean;
 };
 
-/** ---- Remix action ---- **/
+/** ------------ Remix action ------------ **/
 export async function action({ request }: ActionFunctionArgs) {
   try {
     if (request.method !== "POST") {
@@ -62,38 +62,73 @@ export async function action({ request }: ActionFunctionArgs) {
 
     const { admin } = await authenticate.admin(request);
 
-    // Parse JSON body
-    const raw = await request.json().catch(() => ({}));
-    const body = raw as Body;
+    /** ---------- Robust body parsing: JSON or FormData ---------- */
+    let body: any = {};
+    const contentType = request.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+      body = await request.json().catch(() => ({}));
+    } else if (
+      contentType.includes("application/x-www-form-urlencoded") ||
+      contentType.includes("multipart/form-data")
+    ) {
+      const fd = await request.formData();
+      // Convert FormData to object
+      for (const [k, v] of fd.entries()) {
+        body[k] = v;
+      }
+      // Helper to coerce stringified JSON fields
+      const tryParse = (val: any) => {
+        if (typeof val !== "string") return val;
+        const s = val.trim();
+        if (!s) return val;
+        try { return JSON.parse(s); } catch { return val; }
+      };
+      body.productOptions   = tryParse(body.productOptions);
+      body.createVariants   = tryParse(body.createVariants);
+      body.variants         = tryParse(body.variants);
+      body.bundleComponents = tryParse(body.bundleComponents);
+      body.autoPublish      = typeof body.autoPublish === "string" ? /^(true|1|yes)$/i.test(body.autoPublish) : !!body.autoPublish;
+      body.parentIndex      = body.parentIndex != null ? Number(body.parentIndex) : body.parentIndex;
+      body.qty              = body.qty != null ? Number(body.qty) : body.qty;
+      // leave price as-is; will be coerced to string later if needed
+    } else {
+      // Fallback: attempt JSON
+      body = await request.json().catch(() => ({}));
+    }
+    /** ---------- end parsing ---------- */
+
+    // Type hint after parsing
+    const b = body as Body;
 
     /** 0) Basic validation */
-    if (!body?.title || typeof body.title !== "string" || !body.title.trim()) {
+    if (!b?.title || typeof b.title !== "string" || !b.title.trim()) {
       return json({ ok: false, error: "Missing title" }, { status: 400 });
     }
 
     /** 1) Normalize incoming variants
      * Accepts:
-     *  - body.createVariants (preferred)
-     *  - body.variants (alias)
+     *  - b.createVariants (preferred)
+     *  - b.variants (alias)
      *  - OR auto-build one variant from top-level price/sku/qty/locationId
      */
     let createVariants: CreateVariantInput[] =
-      Array.isArray(body.createVariants) ? body.createVariants :
-      Array.isArray(body.variants)       ? body.variants       : [];
+      Array.isArray(b.createVariants) ? b.createVariants :
+      Array.isArray(b.variants)       ? b.variants       : [];
 
     // Auto-build single variant if none provided but top-level fields exist
     if ((!createVariants || createVariants.length === 0) &&
-        (body.price != null || body.sku || body.qty != null)) {
-      const priceStr = body.price != null ? String(body.price) : undefined;
+        (b.price != null || b.sku || b.qty != null)) {
+      const priceStr = b.price != null ? String(b.price) : undefined;
       createVariants = [
         {
           price: priceStr,
-          inventoryItem: body.sku
-            ? { sku: body.sku, tracked: true, requiresShipping: true }
+          inventoryItem: b.sku
+            ? { sku: b.sku, tracked: true, requiresShipping: true }
             : undefined,
           inventoryQuantities:
-            body.qty != null && body.locationId
-              ? [{ locationId: body.locationId, availableQuantity: Number(body.qty) }]
+            b.qty != null && b.locationId
+              ? [{ locationId: b.locationId, availableQuantity: Number(b.qty) }]
               : undefined,
           requiresComponents: true,
         },
@@ -119,9 +154,9 @@ export async function action({ request }: ActionFunctionArgs) {
       }`,
       {
         variables: {
-          product: body.productOptions
-            ? { title: body.title, productOptions: body.productOptions }
-            : { title: body.title },
+          product: b.productOptions
+            ? { title: b.title, productOptions: b.productOptions }
+            : { title: b.title },
         },
       }
     );
@@ -142,115 +177,4 @@ export async function action({ request }: ActionFunctionArgs) {
     const bulkRes = await admin.graphql(
       `#graphql
       mutation BulkVariants($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-        productVariantsBulkCreate(productId: $productId, variants: $variants) {
-          productVariants { id title selectedOptions { name value } }
-          userErrors { field message }
-        }
-      }`,
-      { variables: { productId, variants: createVariants } }
-    );
-    const bulkData = await bulkRes.json();
-    const vErr = bulkData?.data?.productVariantsBulkCreate?.userErrors ?? [];
-    if (vErr.length) {
-      return json({ ok: false, step: "productVariantsBulkCreate", errors: vErr }, { status: 400 });
-    }
-    const createdVariants: Array<{ id: string; title: string }> =
-      bulkData?.data?.productVariantsBulkCreate?.productVariants ?? [];
-    if (!createdVariants.length) {
-      return json({ ok: false, error: "No variants created" }, { status: 500 });
-    }
-
-    /** 4) Wire bundle components to the chosen parent variant */
-    let bundleRelResult: any = null;
-    const parentIndex = Number.isInteger(body.parentIndex) ? (body.parentIndex as number) : 0;
-    const parentVariantId = createdVariants[parentIndex]?.id;
-
-    if (parentVariantId && Array.isArray(body.bundleComponents) && body.bundleComponents.length > 0) {
-      const componentsInput = body.bundleComponents.map((c) => ({
-        id: c.variantId,
-        quantity: Number(c.qty),
-      }));
-
-      const relRes = await admin.graphql(
-        `#graphql
-        mutation CreateBundleComponents($input: [ProductVariantRelationshipUpdateInput!]!) {
-          productVariantRelationshipBulkUpdate(input: $input) {
-            parentProductVariants {
-              id
-              productVariantComponents(first: 50) {
-                nodes { id quantity productVariant { id } }
-              }
-            }
-            userErrors { code field message }
-          }
-        }`,
-        {
-          variables: {
-            input: [
-              {
-                parentProductVariantId: parentVariantId,
-                productVariantRelationshipsToCreate: componentsInput,
-              },
-            ],
-          },
-        }
-      );
-      const relData = await relRes.json();
-      const relErr = relData?.data?.productVariantRelationshipBulkUpdate?.userErrors ?? [];
-      if (relErr.length) {
-        return json({ ok: false, step: "bundleComponents", errors: relErr }, { status: 400 });
-      }
-      bundleRelResult =
-        relData?.data?.productVariantRelationshipBulkUpdate?.parentProductVariants ?? null;
-    }
-
-    /** 5) Optional: publish to Online Store */
-    let publishResult: any = null;
-    if (body.autoPublish) {
-      const pubsRes = await admin.graphql(
-        `#graphql
-        query Publications {
-          publications(first: 20) { edges { node { id name } } }
-        }`
-      );
-      const pubsData = await pubsRes.json();
-      const pubs: Array<{ id: string; name: string }> =
-        pubsData?.data?.publications?.edges?.map((e: any) => e.node) ?? [];
-      const onlineStore = pubs.find((p) => /online store/i.test(p.name)) || pubs[0];
-
-      if (onlineStore) {
-        const pubRes = await admin.graphql(
-          `#graphql
-          mutation Publish($id: ID!, $pub: ID!) {
-            publishablePublish(id: $id, input: { publicationId: $pub }) {
-              publishable { ... on Product { id status } }
-              userErrors { field message }
-            }
-          }`,
-          { variables: { id: productId, pub: onlineStore.id } }
-        );
-        const pubData = await pubRes.json();
-        const pubErr = pubData?.data?.publishablePublish?.userErrors ?? [];
-        if (pubErr.length) {
-          return json({ ok: false, step: "publishablePublish", errors: pubErr }, { status: 400 });
-        }
-        publishResult = pubData?.data?.publishablePublish?.publishable ?? null;
-      }
-    }
-
-    /** 6) Done */
-    return json(
-      {
-        ok: true,
-        productId,
-        variantsCreated: createdVariants,
-        bundleParentVariantId: parentVariantId ?? null,
-        bundleWiring: bundleRelResult,
-        published: publishResult,
-      },
-      { status: 200 }
-    );
-  } catch (err: any) {
-    return json({ ok: false, error: err?.message || String(err) }, { status: 500 });
-  }
-}
+        productVariantsBulkCreate(productId: $productId, vari
